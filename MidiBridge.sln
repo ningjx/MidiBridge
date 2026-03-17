@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.13.35825.156
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MidiBridge", "MidiBridge\MidiBridge.csproj", "{F63037DD-9EB0-48EA-B2C7-B0B5E070C872}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Test", "Test\Test.csproj", "{4716B73F-BB2D-4EC8-896E-D4270389A6E3}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{F63037DD-9EB0-48EA-B2C7-B0B5E070C872}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F63037DD-9EB0-48EA-B2C7-B0B5E070C872}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F63037DD-9EB0-48EA-B2C7-B0B5E070C872}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F63037DD-9EB0-48EA-B2C7-B0B5E070C872}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4716B73F-BB2D-4EC8-896E-D4270389A6E3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4716B73F-BB2D-4EC8-896E-D4270389A6E3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4716B73F-BB2D-4EC8-896E-D4270389A6E3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4716B73F-BB2D-4EC8-896E-D4270389A6E3}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {3825D2A1-50CF-445C-B3C5-810D4CF43CF9}
+	EndGlobalSection
+EndGlobal

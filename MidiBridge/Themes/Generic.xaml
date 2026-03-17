@@ -1,0 +1,15 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:converters="clr-namespace:MidiBridge.Converters">
+
+    <converters:BoolToVisibilityConverter x:Key="BoolToVis"/>
+    <converters:InverseBoolToVisibilityConverter x:Key="InverseBoolToVis"/>
+    <converters:StatusToBrushConverter x:Key="StatusToBrushConverter"/>
+    <converters:IsConnectedConverter x:Key="IsConnectedConverter"/>
+    <converters:BoolToMarginConverter x:Key="BoolToMarginConverter"/>
+
+    <SolidColorBrush x:Key="PanelBackground" Color="#1E1E1E"/>
+    <SolidColorBrush x:Key="HeaderBackground" Color="#252526"/>
+    <SolidColorBrush x:Key="AccentColor" Color="#007ACC"/>
+
+</ResourceDictionary>

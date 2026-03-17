@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish
+        run: dotnet publish MidiBridge/MidiBridge.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+
+      - name: Create ZIP
+        run: |
+          cd MidiBridge/bin/Release/net8.0-windows/win-x64/publish
+          7z a -tzip MidiBridge-win-x64.zip MidiBridge.exe
+
+      - name: Get version
+        id: version
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = "${{ github.event.inputs.version }}"
+          } else {
+            $version = "${{ github.ref_name }}"
+          }
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: MIDI Bridge ${{ steps.version.outputs.VERSION }}
+          body: |
+            ## MIDI Bridge ${{ steps.version.outputs.VERSION }}
+            
+            ### 下载
+            - `MidiBridge-win-x64.zip` - Windows 64位版本
+            
+            ### 使用方法
+            1. 解压 ZIP 文件
+            2. 运行 `MidiBridge.exe`
+          files: |
+            MidiBridge/bin/Release/net8.0-windows/win-x64/publish/MidiBridge-win-x64.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,681 @@
+using System.Collections.Specialized;
+using System.ComponentModel;
+using System.Windows;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
+using System.Windows.Shapes;
+using System.Windows.Controls;
+using MidiBridge.Controls;
+using MidiBridge.Models;
+using MidiBridge.ViewModels;
+using MidiBridge.Services.NetworkMidi2;
+
+namespace MidiBridge;
+
+public partial class MainWindow : Window
+{
+    private MainViewModel VM => (MainViewModel)DataContext;
+    private readonly Dictionary<string, MidiRoute> _subscribedRoutes = new();
+    private readonly Dictionary<string, Color> _deviceColors = new();
+    private static readonly Random _random = new();
+    private int _colorIndex;
+    
+    private static readonly Color[] _predefinedColors = new[]
+    {
+        Color.FromRgb(74, 144, 217),
+        Color.FromRgb(92, 184, 92),
+        Color.FromRgb(240, 173, 78),
+        Color.FromRgb(217, 83, 79),
+        Color.FromRgb(153, 102, 204),
+        Color.FromRgb(64, 196, 255),
+        Color.FromRgb(255, 140, 0),
+        Color.FromRgb(0, 206, 209),
+        Color.FromRgb(255, 105, 180),
+        Color.FromRgb(50, 205, 50),
+        Color.FromRgb(255, 215, 0),
+        Color.FromRgb(138, 43, 226),
+        Color.FromRgb(0, 191, 255),
+        Color.FromRgb(255, 99, 71),
+        Color.FromRgb(46, 139, 87),
+    };
+
+    private bool _isDragging;
+    private bool _isRealDragging;
+    private string? _draggedDeviceId;
+    private bool _dragIsInput;
+    private Border? _draggedBorder;
+    private ContentPresenter? _draggedContainer;
+    private Rectangle? _dropIndicator;
+    private Canvas? _dropCanvas;
+
+    private int _currentDropIndex = -1;
+    private int _dragSourceIndex = -1;
+    private double _dragInitialY;
+    private TranslateTransform? _dragTransform;
+
+    public MainWindow()
+    {
+        var vm = new MainViewModel();
+        DataContext = vm;
+        
+        var config = vm.ConfigService.Config.Window;
+        if (!double.IsNaN(config.Left) && !double.IsNaN(config.Top))
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Left = config.Left;
+            Top = config.Top;
+        }
+        if (config.Width > 0 && config.Height > 0)
+        {
+            Width = config.Width;
+            Height = config.Height;
+        }
+        
+        InitializeComponent();
+        
+        if (config.IsMaximized)
+        {
+            WindowState = WindowState.Maximized;
+        }
+        
+        Loaded += MainWindow_Loaded;
+    }
+
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (VM.Routes is INotifyCollectionChanged routes)
+        {
+            routes.CollectionChanged += Routes_CollectionChanged;
+        }
+        SizeChanged += (s, args) => DrawConnections();
+        DrawConnections();
+
+        VM.Initialize();
+    }
+
+    private void Routes_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.NewItems != null)
+        {
+            foreach (MidiRoute route in e.NewItems)
+            {
+                route.PropertyChanged += Route_PropertyChanged;
+                _subscribedRoutes[route.Id] = route;
+            }
+        }
+
+        if (e.OldItems != null)
+        {
+            foreach (MidiRoute route in e.OldItems)
+            {
+                route.PropertyChanged -= Route_PropertyChanged;
+                _subscribedRoutes.Remove(route.Id);
+            }
+        }
+
+        Dispatcher.Invoke(DrawConnections);
+    }
+
+    private void Route_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MidiRoute.IsTransmitting) || 
+            e.PropertyName == nameof(MidiRoute.IsEnabled) ||
+            e.PropertyName == nameof(MidiRoute.IsEffectivelyEnabled))
+        {
+            Dispatcher.Invoke(DrawConnections);
+        }
+    }
+
+    private void InputConnector_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement element)
+        {
+            var border = FindParent<Border>(element);
+            if (border?.Tag is string deviceId)
+            {
+                VM.SelectInputDevice(deviceId);
+                DrawConnections();
+            }
+        }
+        e.Handled = true;
+    }
+
+    private void OutputConnector_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement element)
+        {
+            var border = FindParent<Border>(element);
+            if (border?.Tag is string deviceId)
+            {
+                VM.SelectOutputDevice(deviceId);
+                DrawConnections();
+            }
+        }
+        e.Handled = true;
+    }
+
+    private void NM2Device_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement element && element.DataContext is NetworkMidi2Protocol.DiscoveredDevice device)
+        {
+            VM.SelectedDiscoveredDevice = device;
+            VM.InviteNM2DeviceCommand.Execute(null);
+        }
+        e.Handled = true;
+    }
+
+    private static T? FindParent<T>(DependencyObject child) where T : DependencyObject
+    {
+        DependencyObject? parent = VisualTreeHelper.GetParent(child);
+        while (parent != null)
+        {
+            if (parent is T typed)
+                return typed;
+            parent = VisualTreeHelper.GetParent(parent);
+        }
+        return null;
+    }
+
+    private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
+    {
+        var isMaximized = WindowState == WindowState.Maximized;
+        var left = isMaximized ? RestoreBounds.Left : Left;
+        var top = isMaximized ? RestoreBounds.Top : Top;
+        var width = isMaximized ? RestoreBounds.Width : Width;
+        var height = isMaximized ? RestoreBounds.Height : Height;
+
+        VM.SaveConfig(left, top, width, height, isMaximized);
+        VM.Cleanup();
+    }
+
+    private void ScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        DrawConnections();
+    }
+
+    private void DrawConnections()
+    {
+        if (ConnectionCanvas == null || ConnectionCanvas.ActualWidth == 0) return;
+
+        ConnectionCanvas.Children.Clear();
+
+        foreach (var route in VM.Routes)
+        {
+            var inputBorder = FindDeviceBorder(route.Source.Id, isInput: true);
+            var outputBorder = FindDeviceBorder(route.Target.Id, isInput: false);
+
+            if (inputBorder == null || outputBorder == null) continue;
+
+            var startPoint = inputBorder.TranslatePoint(new Point(inputBorder.ActualWidth, inputBorder.ActualHeight / 2), ConnectionCanvas);
+            var endPoint = outputBorder.TranslatePoint(new Point(0, outputBorder.ActualHeight / 2), ConnectionCanvas);
+
+            if (startPoint.X < 0 || startPoint.Y < 0 || endPoint.X < 0 || endPoint.Y < 0) continue;
+
+            var path = CreateBezierPath(startPoint.X, startPoint.Y, endPoint.X, endPoint.Y, GetRouteColor(route.Source.Id), route);
+            path.MouseRightButtonDown += Connection_RightClick;
+            ConnectionCanvas.Children.Add(path);
+        }
+    }
+
+    private Border? FindDeviceBorder(string deviceId, bool isInput)
+    {
+        var scrollViewer = isInput ? InputScrollViewer : OutputScrollViewer;
+        if (scrollViewer == null) return null;
+
+        var itemsControl = FindVisualChild<ItemsControl>(scrollViewer);
+        if (itemsControl == null) return null;
+
+        var device = isInput
+            ? VM.InputDevices.FirstOrDefault(d => d.Id == deviceId)
+            : VM.OutputDevices.FirstOrDefault(d => d.Id == deviceId);
+
+        if (device == null) return null;
+
+        var container = itemsControl.ItemContainerGenerator.ContainerFromItem(device) as ContentPresenter;
+        if (container == null) return null;
+
+        return FindVisualChild<Border>(container);
+    }
+
+    private Ellipse? FindConnectorEllipse(string deviceId, bool isInput)
+    {
+        var scrollViewer = isInput ? InputScrollViewer : OutputScrollViewer;
+        if (scrollViewer == null) return null;
+
+        var itemsControl = FindVisualChild<ItemsControl>(scrollViewer);
+        if (itemsControl == null) return null;
+
+        var device = isInput
+            ? VM.InputDevices.FirstOrDefault(d => d.Id == deviceId)
+            : VM.OutputDevices.FirstOrDefault(d => d.Id == deviceId);
+
+        if (device == null) return null;
+
+        var container = itemsControl.ItemContainerGenerator.ContainerFromItem(device) as ContentPresenter;
+        if (container == null) return null;
+
+        return FindVisualChild<Ellipse>(container);
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T typed)
+                return typed;
+
+            var result = FindVisualChild<T>(child);
+            if (result != null)
+                return result;
+        }
+        return null;
+    }
+
+    private void Connection_RightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is Path path && path.Tag is string routeId)
+        {
+            VM.RemoveRouteCommand.Execute(VM.Routes.FirstOrDefault(r => r.Id == routeId));
+            DrawConnections();
+        }
+    }
+
+    private void Connection_LeftClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is Path path && path.Tag is string routeId)
+        {
+            VM.ToggleRouteEnabled(routeId);
+            DrawConnections();
+        }
+        e.Handled = true;
+    }
+
+    private Path CreateBezierPath(double x1, double y1, double x2, double y2, Color color, MidiRoute route)
+    {
+        double distance = x2 - x1;
+        double controlOffset = Math.Max(50, distance * 0.4);
+
+        var geometry = new PathGeometry();
+        var figure = new PathFigure { StartPoint = new Point(x1, y1) };
+
+        figure.Segments.Add(new BezierSegment(
+            new Point(x1 + controlOffset, y1),
+            new Point(x2 - controlOffset, y2),
+            new Point(x2, y2),
+            true));
+
+        geometry.Figures.Add(figure);
+
+        Color lineColor;
+        if (!route.IsEnabled)
+        {
+            lineColor = Color.FromRgb(128, 128, 128);
+        }
+        else if (!route.IsEffectivelyEnabled)
+        {
+            byte r = (byte)((color.R * 0.25) + (128 * 0.75));
+            byte g = (byte)((color.G * 0.25) + (128 * 0.75));
+            byte b = (byte)((color.B * 0.25) + (128 * 0.75));
+            lineColor = Color.FromRgb(r, g, b);
+        }
+        else
+        {
+            lineColor = color;
+        }
+
+        var path = new Path
+        {
+            Data = geometry,
+            Stroke = new SolidColorBrush(lineColor),
+            StrokeThickness = route.IsEffectivelyEnabled ? 3 : 2,
+            ToolTip = route.IsEnabled ? "左键禁用 | 右键删除" : "左键启用 | 右键删除",
+            Cursor = Cursors.Hand,
+            Tag = route.Id,
+            IsHitTestVisible = true
+        };
+
+        path.MouseLeftButtonDown += Connection_LeftClick;
+
+        if (route.IsEffectivelyEnabled && route.IsTransmitting)
+        {
+            path.Effect = new DropShadowEffect
+            {
+                Color = color,
+                BlurRadius = 12,
+                ShadowDepth = 0,
+                Opacity = 1
+            };
+        }
+
+        return path;
+    }
+
+    private Color GetRouteColor(string sourceId)
+    {
+        if (_deviceColors.TryGetValue(sourceId, out var color))
+        {
+            return color;
+        }
+
+        color = _predefinedColors[_colorIndex % _predefinedColors.Length];
+        _colorIndex++;
+        _deviceColors[sourceId] = color;
+        return color;
+    }
+
+    private void Device_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is Border border && border.Tag is string deviceId)
+        {
+            _isDragging = true;
+            _isRealDragging = false;
+            _draggedDeviceId = deviceId;
+            _dragIsInput = VM.InputDevices.Any(d => d.Id == deviceId);
+            _draggedBorder = border;
+
+            var scrollViewer = _dragIsInput ? InputScrollViewer : OutputScrollViewer;
+            _dragInitialY = e.GetPosition(scrollViewer).Y;
+
+            var devices = _dragIsInput ? VM.InputDevices : VM.OutputDevices;
+            var draggedDevice = devices.FirstOrDefault(d => d.Id == _draggedDeviceId);
+            if (draggedDevice != null)
+            {
+                _dragSourceIndex = devices.IndexOf(draggedDevice);
+            }
+
+            var itemsControl = _dragIsInput ? InputItemsControl : OutputItemsControl;
+            _draggedContainer = itemsControl?.ItemContainerGenerator.ContainerFromItem(draggedDevice) as ContentPresenter;
+
+            _dragTransform = border.RenderTransform as TranslateTransform;
+            if (_dragTransform == null)
+            {
+                _dragTransform = new TranslateTransform();
+                border.RenderTransform = _dragTransform;
+            }
+
+            border.CaptureMouse();
+        }
+        e.Handled = true;
+    }
+
+    private void Device_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_isDragging || _draggedDeviceId == null || _draggedBorder == null || _dragTransform == null) return;
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            EndDrag();
+            return;
+        }
+
+        var scrollViewer = _dragIsInput ? InputScrollViewer : OutputScrollViewer;
+        if (scrollViewer == null) return;
+
+        var currentY = e.GetPosition(scrollViewer).Y;
+        var offsetY = currentY - _dragInitialY;
+
+        if (!_isRealDragging && Math.Abs(offsetY) > 3)
+        {
+            _isRealDragging = true;
+            if (_draggedContainer != null)
+            {
+                Panel.SetZIndex(_draggedContainer, 1000);
+            }
+            ShowDropIndicator();
+        }
+
+        if (_isRealDragging)
+        {
+            _dragTransform.Y = offsetY;
+
+            var position = e.GetPosition(scrollViewer);
+            var devices = _dragIsInput ? VM.InputDevices : VM.OutputDevices;
+            int targetIndex = CalculateTargetIndex(position.Y, devices.Count, _draggedBorder.ActualHeight);
+
+            if (targetIndex != _currentDropIndex)
+            {
+                _currentDropIndex = targetIndex;
+                UpdateDropIndicator();
+                UpdateItemOffsets();
+            }
+
+            DrawConnections();
+        }
+    }
+
+    private void ShowDropIndicator()
+    {
+        _dropCanvas = _dragIsInput ? InputDropCanvas : OutputDropCanvas;
+        if (_dropCanvas == null || _draggedBorder == null) return;
+
+        _dropIndicator = new Rectangle
+        {
+            Width = _draggedBorder.ActualWidth,
+            Height = _draggedBorder.ActualHeight,
+            Fill = Brushes.Transparent,
+            Stroke = new SolidColorBrush(Color.FromRgb(74, 144, 217)),
+            StrokeThickness = 2,
+            StrokeDashArray = new DoubleCollection { 4, 2 },
+            RadiusX = 6,
+            RadiusY = 6
+        };
+
+        _dropCanvas.Children.Add(_dropIndicator);
+        UpdateDropIndicator();
+    }
+
+    private void UpdateDropIndicator()
+    {
+        if (_dropIndicator == null) return;
+
+        double spacing = 6;
+        double y = _currentDropIndex * (_dropIndicator.Height + spacing) + spacing / 2;
+        Canvas.SetLeft(_dropIndicator, 3);
+        Canvas.SetTop(_dropIndicator, y);
+    }
+
+    private void UpdateItemOffsets()
+    {
+        var scrollViewer = _dragIsInput ? InputScrollViewer : OutputScrollViewer;
+        if (scrollViewer == null) return;
+
+        var itemsControl = FindVisualChild<ItemsControl>(scrollViewer);
+        if (itemsControl == null) return;
+
+        var devices = _dragIsInput ? VM.InputDevices : VM.OutputDevices;
+        double itemHeight = _draggedBorder?.ActualHeight ?? 0;
+        double spacing = 6;
+
+        for (int i = 0; i < devices.Count; i++)
+        {
+            var container = itemsControl.ItemContainerGenerator.ContainerFromItem(devices[i]) as ContentPresenter;
+            if (container == null) continue;
+
+            var border = FindVisualChild<Border>(container);
+            if (border == null || border == _draggedBorder) continue;
+
+            double offsetY = 0;
+            
+            if (_dragSourceIndex >= 0 && _currentDropIndex >= 0)
+            {
+                if (_dragSourceIndex < _currentDropIndex)
+                {
+                    if (i > _dragSourceIndex && i <= _currentDropIndex)
+                    {
+                        offsetY = -(itemHeight + spacing);
+                    }
+                }
+                else if (_dragSourceIndex > _currentDropIndex)
+                {
+                    if (i >= _currentDropIndex && i < _dragSourceIndex)
+                    {
+                        offsetY = itemHeight + spacing;
+                    }
+                }
+            }
+
+            if (offsetY == 0)
+            {
+                border.RenderTransform = null;
+            }
+            else
+            {
+                border.RenderTransform = new TranslateTransform(0, offsetY);
+            }
+        }
+    }
+
+    private void ResetItemOffsets()
+    {
+        var scrollViewer = _dragIsInput ? InputScrollViewer : OutputScrollViewer;
+        if (scrollViewer == null) return;
+
+        var itemsControl = FindVisualChild<ItemsControl>(scrollViewer);
+        if (itemsControl == null) return;
+
+        var devices = _dragIsInput ? VM.InputDevices : VM.OutputDevices;
+
+        foreach (var device in devices)
+        {
+            var container = itemsControl.ItemContainerGenerator.ContainerFromItem(device) as ContentPresenter;
+            if (container == null) continue;
+
+            var border = FindVisualChild<Border>(container);
+            if (border == null) continue;
+
+            border.RenderTransform = null;
+        }
+    }
+
+    private int CalculateTargetIndex(double mouseY, int deviceCount, double itemHeight)
+    {
+        if (deviceCount == 0) return 0;
+        double totalHeight = itemHeight + 6;
+        int index = (int)(mouseY / totalHeight);
+        return Math.Max(0, Math.Min(index, deviceCount - 1));
+    }
+
+private void EndDrag(bool performMove = false)
+    {
+        if (performMove && _isRealDragging && _draggedDeviceId != null && _draggedBorder != null)
+        {
+            var scrollViewer = _dragIsInput ? InputScrollViewer : OutputScrollViewer;
+            var devices = _dragIsInput ? VM.InputDevices : VM.OutputDevices;
+
+            if (scrollViewer != null && devices.Count > 0 && _currentDropIndex >= 0)
+            {
+                var draggedDevice = devices.FirstOrDefault(d => d.Id == _draggedDeviceId);
+                if (draggedDevice != null)
+                {
+                    int sourceIndex = devices.IndexOf(draggedDevice);
+                    if (sourceIndex >= 0 && sourceIndex != _currentDropIndex)
+                    {
+                        devices.Move(sourceIndex, _currentDropIndex);
+                        VM.SaveDeviceOrder();
+                        DrawConnections();
+                    }
+                }
+            }
+        }
+
+        ResetItemOffsets();
+
+        if (_draggedContainer != null)
+        {
+            Panel.SetZIndex(_draggedContainer, 0);
+        }
+
+        if (_draggedBorder != null)
+        {
+            _draggedBorder.RenderTransform = null;
+            _draggedBorder.ReleaseMouseCapture();
+        }
+
+        if (_dropCanvas != null && _dropIndicator != null)
+        {
+            _dropCanvas.Children.Remove(_dropIndicator);
+            _dropIndicator = null;
+        }
+
+        _isDragging = false;
+        _isRealDragging = false;
+        _draggedDeviceId = null;
+        _draggedBorder = null;
+        _draggedContainer = null;
+        _dragTransform = null;
+        _dropCanvas = null;
+        _currentDropIndex = -1;
+        _dragSourceIndex = -1;
+
+        Dispatcher.BeginInvoke(DrawConnections, System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+protected override void OnMouseUp(MouseButtonEventArgs e)
+    {
+        if (_isDragging)
+        {
+            EndDrag(performMove: _isRealDragging);
+        }
+        base.OnMouseUp(e);
+    }
+
+    private void Device_RightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is Border border && border.ContextMenu != null)
+        {
+            border.ContextMenu.PlacementTarget = border;
+            border.ContextMenu.IsOpen = true;
+        }
+        e.Handled = true;
+    }
+
+    private void ContextMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        if (sender is ContextMenu menu && menu.PlacementTarget is Border border)
+        {
+            if (border.DataContext is MidiDevice device)
+            {
+                foreach (var item in menu.Items)
+                {
+                    if (item is MenuItem menuItem)
+                    {
+                        menuItem.DataContext = VM;
+                        menuItem.Command = VM.ToggleDeviceEnabledCommand;
+                        menuItem.CommandParameter = device.Id;
+                        menuItem.Header = device.EnabledText;
+                    }
+                }
+            }
+        }
+    }
+
+    private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount == 2)
+        {
+            WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+        }
+        else
+        {
+            DragMove();
+        }
+    }
+
+    private void MinimizeButton_Click(object sender, RoutedEventArgs e)
+    {
+        WindowState = WindowState.Minimized;
+    }
+
+    private void MaximizeButton_Click(object sender, RoutedEventArgs e)
+    {
+        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+    }
+
+    private void CloseButton_Click(object sender, RoutedEventArgs e)
+    {
+        Close();
+    }
+}
