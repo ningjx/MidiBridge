@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using MidiBridge.Services;
 using Timer = System.Timers.Timer;
 
 namespace MidiBridge.Models;
@@ -104,21 +103,14 @@ public class MidiRoute : INotifyPropertyChanged
     {
         if (_isTransmitting == value) return;
         _isTransmitting = value;
-
-        DispatcherService.RunOnUIThread(() =>
-        {
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsTransmitting)));
-        });
+        OnPropertyChanged(nameof(IsTransmitting));
     }
 
     private void OnDevicePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(MidiDevice.IsEnabled))
         {
-            DispatcherService.RunOnUIThread(() =>
-            {
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsEffectivelyEnabled)));
-            });
+            OnPropertyChanged(nameof(IsEffectivelyEnabled));
         }
     }
 
@@ -128,9 +120,6 @@ public class MidiRoute : INotifyPropertyChanged
 
     protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
-        DispatcherService.RunOnUIThread(() =>
-        {
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        });
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 }
