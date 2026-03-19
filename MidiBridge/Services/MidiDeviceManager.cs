@@ -21,7 +21,7 @@ public class MidiDeviceManager : IMidiDeviceManager
     private readonly ConcurrentDictionary<int, MidiIn> _localInputs = new();
     private readonly ConcurrentDictionary<int, MidiOut> _localOutputs = new();
     private readonly MidiRouter _router;
-    private readonly ConfigService _configService;
+    private readonly IConfigService _configService;
     
     private UdpClient? _rtpControlServer;
     private UdpClient? _rtpDataServer;
@@ -60,9 +60,9 @@ public class MidiDeviceManager : IMidiDeviceManager
         set => _nm2Port = value;
     }
 
-    public MidiDeviceManager(ConfigService configService)
+    public MidiDeviceManager(IConfigService configService)
     {
-        _configService = configService;
+        _configService = configService ?? throw new ArgumentNullException(nameof(configService));
         _router = new MidiRouter(this, configService);
     }
 

@@ -13,7 +13,7 @@ namespace MidiBridge.Services;
 public class MidiRouter : IMidiRouter
 {
     private readonly MidiDeviceManager _deviceManager;
-    private readonly ConfigService _configService;
+    private readonly IConfigService _configService;
     private readonly ConcurrentDictionary<string, MidiRoute> _routes = new();
     private readonly ConcurrentDictionary<string, RouteConfig> _savedRoutes = new();
 
@@ -23,10 +23,10 @@ public class MidiRouter : IMidiRouter
 
     public ObservableCollection<MidiRoute> Routes { get; } = new();
 
-    public MidiRouter(MidiDeviceManager deviceManager, ConfigService configService)
+    public MidiRouter(MidiDeviceManager deviceManager, IConfigService configService)
     {
-        _deviceManager = deviceManager;
-        _configService = configService;
+        _deviceManager = deviceManager ?? throw new ArgumentNullException(nameof(deviceManager));
+        _configService = configService ?? throw new ArgumentNullException(nameof(configService));
         LoadSavedRoutes();
     }
 
