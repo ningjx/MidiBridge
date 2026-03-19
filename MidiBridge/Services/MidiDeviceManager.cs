@@ -31,9 +31,13 @@ public class MidiDeviceManager : IMidiDeviceManager
     public event EventHandler<string>? StatusChanged;
     public event EventHandler<(MidiDevice Device, byte[] Data)>? MidiDataReceived;
 
-    public ObservableCollection<MidiDevice> InputDevices { get; } = new();
-    public ObservableCollection<MidiDevice> OutputDevices { get; } = new();
-    public ObservableCollection<NetworkMidi2Protocol.DiscoveredDevice> DiscoveredNM2Devices { get; } = new();
+    public SafeObservableCollection<MidiDevice> InputDevices { get; } = new();
+    public SafeObservableCollection<MidiDevice> OutputDevices { get; } = new();
+    public SafeObservableCollection<NetworkMidi2Protocol.DiscoveredDevice> DiscoveredNM2Devices { get; } = new();
+
+    ObservableCollection<MidiDevice> IMidiDeviceManager.InputDevices => InputDevices;
+    ObservableCollection<MidiDevice> IMidiDeviceManager.OutputDevices => OutputDevices;
+    ObservableCollection<NetworkMidi2Protocol.DiscoveredDevice> IMidiDeviceManager.DiscoveredNM2Devices => DiscoveredNM2Devices;
 
     IMidiRouter IMidiDeviceManager.Router => _router;
     public MidiRouter Router => _router;
@@ -60,7 +64,7 @@ public class MidiDeviceManager : IMidiDeviceManager
         _configService = configService ?? throw new ArgumentNullException(nameof(configService));
         _localMidiService = localMidiService ?? throw new ArgumentNullException(nameof(localMidiService));
         _rtpMidiService = rtpMidiService ?? throw new ArgumentNullException(nameof(rtpMidiService));
-        
+
         _router = new MidiRouter(this, configService);
 
         SetupLocalMidiServiceEvents();
@@ -158,11 +162,11 @@ public class MidiDeviceManager : IMidiDeviceManager
 
         _mdnsDiscoveryService.DeviceDiscovered += (s, device) =>
         {
-            System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+            DispatcherService.RunOnUIThread(() =>
             {
                 if (!DiscoveredNM2Devices.Any(d => d.Name == device.Name && d.Host == device.Host))
                 {
-                    DiscoveredNM2Devices.Add(device);
+                    DiscoveredNM2Devices.AddSafe(device);
                     OnStatusChanged($"发现设备: {device.Name} ({device.Host}:{device.Port})");
                 }
             });
@@ -170,12 +174,12 @@ public class MidiDeviceManager : IMidiDeviceManager
 
         _mdnsDiscoveryService.DeviceLost += (s, device) =>
         {
-            System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+            DispatcherService.RunOnUIThread(() =>
             {
                 var existing = DiscoveredNM2Devices.FirstOrDefault(d => d.Name == device.Name && d.Host == device.Host);
                 if (existing != null)
                 {
-                    DiscoveredNM2Devices.Remove(existing);
+                    DiscoveredNM2Devices.RemoveSafe(existing);
                 }
             });
         };
@@ -198,7 +202,7 @@ public class MidiDeviceManager : IMidiDeviceManager
 
         RemoveNetworkDevices();
 
-        System.Windows.Application.Current?.Dispatcher.Invoke(() => DiscoveredNM2Devices.Clear());
+        DiscoveredNM2Devices.ClearSafe();
 
         OnStatusChanged("网络服务已停止");
     }
@@ -207,14 +211,11 @@ public class MidiDeviceManager : IMidiDeviceManager
     {
         var networkDevices = _devices.Values.Where(d => d.IsNetwork).ToList();
 
-        System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+        foreach (var device in networkDevices)
         {
-            foreach (var device in networkDevices)
-            {
-                InputDevices.Remove(device);
-                OutputDevices.Remove(device);
-            }
-        });
+            InputDevices.RemoveSafe(device);
+            OutputDevices.RemoveSafe(device);
+        }
 
         foreach (var device in networkDevices)
         {
@@ -315,7 +316,7 @@ public class MidiDeviceManager : IMidiDeviceManager
         int oldIndex = devices.IndexOf(device);
         if (oldIndex < 0 || oldIndex == newIndex) return;
 
-        devices.Move(oldIndex, newIndex);
+        devices.MoveSafe(oldIndex, newIndex);
         SaveDeviceOrder();
     }
 
@@ -348,17 +349,14 @@ public class MidiDeviceManager : IMidiDeviceManager
         device.IsEnabled = _configService.IsDeviceEnabled(device.Id);
         _devices[device.Id] = device;
 
-        System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+        if (device.IsInput && !InputDevices.Any(d => d.Id == device.Id))
         {
-            if (device.IsInput && !InputDevices.Any(d => d.Id == device.Id))
-            {
-                InsertDeviceSorted(InputDevices, device, _configService.GetInputDeviceOrder());
-            }
-            else if (device.IsOutput && !OutputDevices.Any(d => d.Id == device.Id))
-            {
-                InsertDeviceSorted(OutputDevices, device, _configService.GetOutputDeviceOrder());
-            }
-        });
+            InsertDeviceSorted(InputDevices, device, _configService.GetInputDeviceOrder());
+        }
+        else if (device.IsOutput && !OutputDevices.Any(d => d.Id == device.Id))
+        {
+            InsertDeviceSorted(OutputDevices, device, _configService.GetOutputDeviceOrder());
+        }
 
         DeviceAdded?.Invoke(this, device);
 
@@ -373,17 +371,14 @@ public class MidiDeviceManager : IMidiDeviceManager
         device.IsEnabled = _configService.IsDeviceEnabled(device.Id);
         _devices[device.Id] = device;
 
-        System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+        if (device.IsInput && !InputDevices.Any(d => d.Id == device.Id))
         {
-            if (device.IsInput && !InputDevices.Any(d => d.Id == device.Id))
-            {
-                InsertDeviceSorted(InputDevices, device, _configService.GetInputDeviceOrder());
-            }
-            else if (device.IsOutput && !OutputDevices.Any(d => d.Id == device.Id))
-            {
-                InsertDeviceSorted(OutputDevices, device, _configService.GetOutputDeviceOrder());
-            }
-        });
+            InsertDeviceSorted(InputDevices, device, _configService.GetInputDeviceOrder());
+        }
+        else if (device.IsOutput && !OutputDevices.Any(d => d.Id == device.Id))
+        {
+            InsertDeviceSorted(OutputDevices, device, _configService.GetOutputDeviceOrder());
+        }
 
         if (device.IsEnabled)
         {
@@ -420,11 +415,8 @@ public class MidiDeviceManager : IMidiDeviceManager
     {
         if (_devices.TryRemove(deviceId, out var device))
         {
-            System.Windows.Application.Current?.Dispatcher.Invoke(() =>
-            {
-                InputDevices.Remove(device);
-                OutputDevices.Remove(device);
-            });
+            InputDevices.RemoveSafe(device);
+            OutputDevices.RemoveSafe(device);
 
             _router.OnDeviceDisconnected(device);
             device.Dispose();

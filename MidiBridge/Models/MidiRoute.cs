@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using MidiBridge.Services;
 using Timer = System.Timers.Timer;
 
 namespace MidiBridge.Models;
@@ -21,12 +22,12 @@ public class MidiRoute : INotifyPropertyChanged
     }
 
     public string Id { get; init; } = Guid.NewGuid().ToString();
-    
+
     private MidiDevice _source = null!;
-    public MidiDevice Source 
-    { 
+    public MidiDevice Source
+    {
         get => _source;
-        set 
+        set
         {
             if (_source != null)
             {
@@ -39,12 +40,12 @@ public class MidiRoute : INotifyPropertyChanged
             }
         }
     }
-    
+
     private MidiDevice _target = null!;
-    public MidiDevice Target 
-    { 
+    public MidiDevice Target
+    {
         get => _target;
-        set 
+        set
         {
             if (_target != null)
             {
@@ -57,7 +58,7 @@ public class MidiRoute : INotifyPropertyChanged
             }
         }
     }
-    
+
     public bool IsEnabled
     {
         get => _isEnabled;
@@ -69,9 +70,9 @@ public class MidiRoute : INotifyPropertyChanged
             OnPropertyChanged(nameof(IsEffectivelyEnabled));
         }
     }
-    
+
     public bool IsEffectivelyEnabled => IsEnabled && (Source?.IsEnabled ?? true) && (Target?.IsEnabled ?? true);
-    
+
     public DateTime CreatedTime { get; init; } = DateTime.Now;
     public long TransferredMessages { get; set; }
     public bool FilterNoteOn { get; set; } = true;
@@ -103,8 +104,8 @@ public class MidiRoute : INotifyPropertyChanged
     {
         if (_isTransmitting == value) return;
         _isTransmitting = value;
-        
-        System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+
+        DispatcherService.RunOnUIThread(() =>
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsTransmitting)));
         });
@@ -114,7 +115,7 @@ public class MidiRoute : INotifyPropertyChanged
     {
         if (e.PropertyName == nameof(MidiDevice.IsEnabled))
         {
-            System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+            DispatcherService.RunOnUIThread(() =>
             {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsEffectivelyEnabled)));
             });
@@ -127,7 +128,7 @@ public class MidiRoute : INotifyPropertyChanged
 
     protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
-        System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+        DispatcherService.RunOnUIThread(() =>
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         });

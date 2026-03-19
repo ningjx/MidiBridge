@@ -21,7 +21,9 @@ public class MidiRouter : IMidiRouter
     public event EventHandler<MidiRoute>? RouteRemoved;
     public event EventHandler<MidiRoute>? RouteUpdated;
 
-    public ObservableCollection<MidiRoute> Routes { get; } = new();
+    public SafeObservableCollection<MidiRoute> Routes { get; } = new();
+
+    ObservableCollection<MidiRoute> IMidiRouter.Routes => Routes;
 
     public MidiRouter(MidiDeviceManager deviceManager, IConfigService configService)
     {
@@ -56,10 +58,7 @@ public class MidiRouter : IMidiRouter
             target.HasActiveRoute = true;
         }
 
-        System.Windows.Application.Current?.Dispatcher.Invoke(() =>
-        {
-            Routes.Add(route);
-        });
+        Routes.Add(route);
 
         RouteAdded?.Invoke(this, route);
 
@@ -76,14 +75,11 @@ public class MidiRouter : IMidiRouter
         if (_routes.TryRemove(routeId, out var route))
         {
             route.PropertyChanged -= Route_PropertyChanged;
-            
+
             UpdateDeviceRouteStatus(route.Source);
             UpdateDeviceRouteStatus(route.Target);
 
-            System.Windows.Application.Current?.Dispatcher.Invoke(() =>
-            {
-                Routes.Remove(route);
-            });
+            Routes.Remove(route);
 
             RouteRemoved?.Invoke(this, route);
 

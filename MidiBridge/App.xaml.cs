@@ -24,6 +24,9 @@ public partial class App : Application
         LogService.Initialize();
         Log.Information("=== MidiBridge 启动 ===");
 
+        // 初始化全局调度器
+        DispatcherService.Initialize();
+
         // 配置依赖注入（ConfigService 在构造时自动加载配置）
         var services = new ServiceCollection();
         services.AddMidiBridgeServices();

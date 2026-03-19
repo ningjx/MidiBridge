@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using MidiBridge.Services;
 using Timer = System.Timers.Timer;
 
 namespace MidiBridge.Models;
@@ -99,7 +100,7 @@ public class MidiDevice : INotifyPropertyChanged, IDisposable
         if (_isTransmitting == value) return;
         _isTransmitting = value;
         
-        System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+        DispatcherService.RunOnUIThread(() =>
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsTransmitting)));
         });

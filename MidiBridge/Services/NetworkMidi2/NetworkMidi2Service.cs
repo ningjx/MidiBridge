@@ -537,10 +537,10 @@ public class NetworkMidi2Service : INetworkMidi2Service
     {
         try
         {
-            System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+            DispatcherService.RunOnUIThread(() =>
             {
                 string stableId = GetStableDeviceId(session.RemoteName, session.RemoteHost);
-                
+
                 var existingDevice = InputDevices.FirstOrDefault(d => d.Id == stableId);
                 if (existingDevice != null)
                 {
@@ -572,7 +572,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
     {
         try
         {
-            System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+            DispatcherService.RunOnUIThread(() =>
             {
                 var device = InputDevices.FirstOrDefault(d => d.Id == sessionId);
                 if (device != null)
