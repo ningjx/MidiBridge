@@ -19,6 +19,14 @@ public class ConfigService : IConfigService
     private AppConfig _config = new();
     public AppConfig Config => _config;
 
+    /// <summary>
+    /// 构造函数，自动加载配置。
+    /// </summary>
+    public ConfigService()
+    {
+        Load();
+    }
+
     public AppConfig Load()
     {
         try

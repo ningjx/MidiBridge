@@ -129,8 +129,46 @@ public class MainViewModel : ViewModelBase
     /// <summary>
     /// 构造函数（用于设计器）。
     /// </summary>
-    public MainViewModel() : this(new ConfigService(), new MidiDeviceManager(new ConfigService()))
+    public MainViewModel()
     {
+        var configService = new ConfigService();
+        _configService = configService;
+        _deviceManager = new MidiDeviceManager(configService);
+        _router = ((MidiDeviceManager)_deviceManager).Router;
+        
+        _rtpPort = _configService.Config.Network.RtpPort;
+        _nm2Port = _configService.Config.Network.NM2Port;
+
+        _deviceManager.StatusChanged += (_, msg) => StatusMessage = msg;
+        _deviceManager.DeviceAdded += OnDeviceAdded;
+        _deviceManager.DeviceRemoved += OnDeviceRemoved;
+        _deviceManager.DeviceUpdated += OnDeviceUpdated;
+        _deviceManager.DiscoveredNM2Devices.CollectionChanged += (_, e) =>
+        {
+            if (e.Action == NotifyCollectionChangedAction.Add)
+            {
+                _discoveryPanelClosed = false;
+            }
+            OnPropertyChanged(nameof(ShowNM2DevicesPanel));
+        };
+
+        ScanCommand = new RelayCommand(_ => ScanDevices());
+        ToggleNetworkCommand = new RelayCommand(_ => ToggleNetwork());
+        ConnectDeviceCommand = new RelayCommand<MidiDevice>(d => ConnectDevice(d));
+        DisconnectDeviceCommand = new RelayCommand<MidiDevice>(d => DisconnectDevice(d));
+        CreateRouteCommand = new RelayCommand(_ => CreateRoute(), _ => _selectedInputDevice != null && _selectedOutputDevice != null);
+        RemoveRouteCommand = new RelayCommand<MidiRoute>(r => RemoveRoute(r));
+        ClearRoutesCommand = new RelayCommand(_ => ClearAllRoutes());
+        C4DownCommand = new RelayCommand(_ => SendC4On(), _ => HasConnectedOutput());
+        C4UpCommand = new RelayCommand(_ => SendC4Off(), _ => _isC4Pressed);
+        RefreshNM2DiscoveryCommand = new RelayCommand(_ => RefreshNM2Discovery(), _ => _deviceManager.IsRunning);
+        InviteNM2DeviceCommand = new RelayCommand(_ => InviteNM2Device(), _ => _selectedDiscoveredDevice != null && _deviceManager.IsRunning);
+        CloseDiscoveryPanelCommand = new RelayCommand(_ =>
+        {
+            _discoveryPanelClosed = true;
+            OnPropertyChanged(nameof(ShowNM2DevicesPanel));
+        });
+        ToggleDeviceEnabledCommand = new RelayCommand<string>(id => ToggleDeviceEnabled(id));
     }
 
     /// <summary>

@@ -24,14 +24,10 @@ public partial class App : Application
         LogService.Initialize();
         Log.Information("=== MidiBridge 启动 ===");
 
-        // 配置依赖注入
+        // 配置依赖注入（ConfigService 在构造时自动加载配置）
         var services = new ServiceCollection();
         services.AddMidiBridgeServices();
         Services = services.BuildServiceProvider();
-
-        // 加载配置
-        var configService = Services.GetRequiredService<IConfigService>();
-        configService.Load();
 
         base.OnStartup(e);
     }
