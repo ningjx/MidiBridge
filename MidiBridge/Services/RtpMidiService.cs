@@ -9,9 +9,6 @@ using Serilog;
 
 namespace MidiBridge.Services;
 
-/// <summary>
-/// RTP-MIDI 服务实现，负责 RTP-MIDI 协议的处理。
-/// </summary>
 public class RtpMidiService : IRtpMidiService
 {
     private const int SYNC_INTERVAL_MS = 5000;
@@ -21,12 +18,17 @@ public class RtpMidiService : IRtpMidiService
     private readonly ConcurrentDictionary<string, MidiDevice> _devices = new();
     private readonly ConcurrentDictionary<string, IPEndPoint> _deviceEndpoints = new();
     private readonly ConcurrentDictionary<string, DateTime> _deviceLastActivity = new();
+    private readonly ConcurrentDictionary<string, ushort> _deviceSequence = new();
+    private readonly ConcurrentDictionary<string, uint> _deviceTimestamp = new();
 
     private UdpClient? _controlServer;
     private UdpClient? _dataServer;
     private CancellationTokenSource? _cts;
     private bool _isRunning;
     private int _controlPort = 5004;
+    private uint _localSSRC;
+
+    private RtpMidiDiscoveryService? _discoveryService;
 
     public ObservableCollection<MidiDevice> InputDevices { get; } = new();
     public bool IsRunning => _isRunning;
@@ -42,6 +44,11 @@ public class RtpMidiService : IRtpMidiService
     public event EventHandler<(MidiDevice Device, byte[] Data)>? MidiDataReceived;
     public event EventHandler<string>? StatusChanged;
 
+    public RtpMidiService()
+    {
+        _localSSRC = (uint)Random.Shared.Next(1, int.MaxValue);
+    }
+
     public bool Start(int controlPort = 5004)
     {
         if (_isRunning) Stop();
@@ -55,6 +62,12 @@ public class RtpMidiService : IRtpMidiService
             _dataServer = new UdpClient(controlPort + 1);
 
             _isRunning = true;
+
+            _discoveryService = new RtpMidiDiscoveryService();
+            _discoveryService.SetServiceInfo("MidiBridge", controlPort);
+            _discoveryService.DeviceDiscovered += OnDeviceDiscovered;
+            _discoveryService.DeviceLost += OnDeviceLost;
+            _discoveryService.Start();
 
             Task.Run(() => ControlLoop(_cts.Token));
             Task.Run(() => DataLoop(_cts.Token));
@@ -72,12 +85,63 @@ public class RtpMidiService : IRtpMidiService
         }
     }
 
+    private void OnDeviceDiscovered(object? sender, RtpMidiDiscoveryService.DiscoveredRtpDevice discovered)
+    {
+        string deviceId = $"rtp-{discovered.Name}@{discovered.Host}";
+
+        if (_devices.ContainsKey(deviceId)) return;
+
+        var device = new MidiDevice
+        {
+            Id = deviceId,
+            Name = discovered.Name,
+            Type = MidiDeviceType.RtpMidi,
+            Protocol = "RTP-MIDI",
+            Host = discovered.Host,
+            Port = discovered.Port,
+            ControlPort = discovered.Port - 1,
+            Status = MidiDeviceStatus.Connected,
+            ConnectedTime = DateTime.Now
+        };
+
+        _devices[deviceId] = device;
+        _deviceEndpoints[deviceId] = new IPEndPoint(IPAddress.Parse(discovered.Host), discovered.Port);
+        _deviceLastActivity[deviceId] = DateTime.Now;
+        _deviceSequence[deviceId] = 0;
+        _deviceTimestamp[deviceId] = 0;
+
+        DeviceAdded?.Invoke(this, device);
+        Log.Information("[RtpMidi] mDNS 发现设备: {Name} ({Host}:{Port})", discovered.Name, discovered.Host, discovered.Port);
+    }
+
+    private void OnDeviceLost(object? sender, RtpMidiDiscoveryService.DiscoveredRtpDevice lost)
+    {
+        string deviceId = $"rtp-{lost.Name}@{lost.Host}";
+
+        if (_devices.TryRemove(deviceId, out var device))
+        {
+            _deviceEndpoints.TryRemove(deviceId, out _);
+            _deviceLastActivity.TryRemove(deviceId, out _);
+            _deviceSequence.TryRemove(deviceId, out _);
+            _deviceTimestamp.TryRemove(deviceId, out _);
+            DeviceRemoved?.Invoke(this, device);
+        }
+    }
+
     public void Stop()
     {
         if (!_isRunning) return;
 
         _isRunning = false;
         _cts?.Cancel();
+
+        if (_discoveryService != null)
+        {
+            _discoveryService.DeviceDiscovered -= OnDeviceDiscovered;
+            _discoveryService.DeviceLost -= OnDeviceLost;
+            _discoveryService.Dispose();
+            _discoveryService = null;
+        }
 
         _controlServer?.Close();
         _dataServer?.Close();
@@ -87,6 +151,8 @@ public class RtpMidiService : IRtpMidiService
         _devices.Clear();
         _deviceEndpoints.Clear();
         _deviceLastActivity.Clear();
+        _deviceSequence.Clear();
+        _deviceTimestamp.Clear();
 
         OnStatusChanged("RTP-MIDI 服务已停止");
     }
@@ -98,7 +164,17 @@ public class RtpMidiService : IRtpMidiService
 
         try
         {
-            var packet = CreateMidiPacket(data);
+            ushort seq = 0;
+            if (_deviceSequence.TryGetValue(device.Id, out var currentSeq))
+            {
+                seq = (ushort)(currentSeq + 1);
+            }
+            _deviceSequence[device.Id] = seq;
+
+            uint timestamp = (uint)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            _deviceTimestamp[device.Id] = timestamp;
+
+            var packet = CreateRtpMidiPacket(seq, timestamp, _localSSRC, data);
             _dataServer.Send(packet, packet.Length, endpoint);
 
             device.SentMessages++;
@@ -442,6 +518,28 @@ public class RtpMidiService : IRtpMidiService
         {
             Log.Debug(ex, "[RTP] 发送同步响应失败: {RemoteEP}", remoteEP);
         }
+    }
+
+    private byte[] CreateRtpMidiPacket(ushort sequenceNumber, uint timestamp, uint ssrc, byte[] midiData)
+    {
+        int rtpHeaderLen = 12;
+        int midiJournalLen = 1 + midiData.Length;
+        int packetLen = rtpHeaderLen + midiJournalLen;
+        var packet = new byte[packetLen];
+
+        packet[0] = 0x80;
+        packet[0] |= 0x61;
+
+        packet[1] = (byte)((sequenceNumber >> 8) & 0xFF);
+        packet[2] = (byte)(sequenceNumber & 0xFF);
+
+        WriteBigEndianUInt32(packet, 4, timestamp);
+        WriteBigEndianUInt32(packet, 8, ssrc);
+
+        packet[12] = (byte)(0xB0 | (midiData.Length & 0x0F));
+        Buffer.BlockCopy(midiData, 0, packet, 13, midiData.Length);
+
+        return packet;
     }
 
     private byte[] CreateMidiPacket(byte[] midiData)

@@ -20,7 +20,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
     private bool _isRunning;
     private readonly ConcurrentDictionary<string, NetworkMidi2Protocol.SessionInfo> _sessions = new();
     private readonly ConcurrentDictionary<string, NetworkMidi2Protocol.DiscoveredDevice> _discoveredDevices = new();
-    private byte _localSSRC;
+    private uint _localSSRC;
     private int _port;
     private string _serviceName;
     private string _productInstanceId;
@@ -42,7 +42,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
     public NetworkMidi2Service()
     {
-        _localSSRC = (byte)Random.Shared.Next(1, 255);
+        _localSSRC = (uint)Random.Shared.Next(1, int.MaxValue);
         _serviceName = NetworkMidi2Protocol.DEFAULT_SERVICE_NAME;
         _productInstanceId = Guid.NewGuid().ToString("N").Substring(0, 16);
         _port = NetworkMidi2Protocol.DEFAULT_PORT;
@@ -135,30 +135,33 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
         Log.Debug("[NM2] 收到命令 cmd={Command}, status={Status}, ssrc={SSRC:X2}, 来源={RemoteEP}", command, status, ssrc, remoteEP);
 
-        switch (command)
-        {
-            case NetworkMidi2Protocol.SessionCommand.Invitation:
-                HandleInvitation(data, status, remoteEP, ssrc, remoteSSRC);
-                break;
-            case NetworkMidi2Protocol.SessionCommand.EndSession:
-                HandleEndSession(remoteEP, ssrc);
-                break;
-            case NetworkMidi2Protocol.SessionCommand.Ping:
-                HandlePing(status, remoteEP, ssrc, remoteSSRC);
-                break;
-            case NetworkMidi2Protocol.SessionCommand.UMPData:
-                HandleUMPData(data, remoteEP);
-                break;
-        }
+switch (command)
+            {
+                case NetworkMidi2Protocol.SessionCommand.Invitation:
+                    HandleInvitation(data, status, remoteEP, ssrc, remoteSSRC);
+                    break;
+                case NetworkMidi2Protocol.SessionCommand.EndSession:
+                    HandleEndSession(remoteEP, ssrc);
+                    break;
+                case NetworkMidi2Protocol.SessionCommand.Ping:
+                    HandlePing(status, remoteEP, ssrc, remoteSSRC);
+                    break;
+                case NetworkMidi2Protocol.SessionCommand.RetransmitRequest:
+                    HandleRetransmitRequest(data, remoteEP, ssrc);
+                    break;
+                case NetworkMidi2Protocol.SessionCommand.UMPData:
+                    HandleUMPData(data, remoteEP);
+                    break;
+            }
     }
 
-    private void HandleInvitation(byte[] data, NetworkMidi2Protocol.CommandStatus status, IPEndPoint remoteEP, byte ssrc, byte remoteSSRC)
+    private void HandleInvitation(byte[] data, NetworkMidi2Protocol.CommandStatus status, IPEndPoint remoteEP, uint ssrc, uint remoteSSRC)
     {
         string sessionId = GetSessionId(remoteEP);
 
         if (status == NetworkMidi2Protocol.CommandStatus.Command)
         {
-            if (!NetworkMidi2Protocol.ParseInvitation(data, out var name, out _))
+            if (!NetworkMidi2Protocol.ParseInvitation(data, out var name, out _, out var remoteCapabilities))
             {
                 name = $"Device ({remoteEP.Address})";
             }
@@ -176,18 +179,18 @@ public class NetworkMidi2Service : INetworkMidi2Service
                 SendSequence = 0,
                 ReceiveSequence = 0,
                 RetransmitBuffer = new List<byte[]>(),
-                SupportsFEC = true,
-                SupportsRetransmit = true,
+                LocalCapabilities = NetworkMidi2Protocol.PeerCapabilities.All,
+                RemoteCapabilities = remoteCapabilities,
             };
 
             _sessions[sessionId] = session;
 
-            var replyPacket = NetworkMidi2Protocol.CreateInvitationReplyPacket(_localSSRC, ssrc);
+            var replyPacket = NetworkMidi2Protocol.CreateInvitationReplyPacket(_localSSRC, ssrc, NetworkMidi2Protocol.PeerCapabilities.All);
             SendPacket(replyPacket, remoteEP);
 
             AddDevice(session);
 
-            Log.Information("[NM2] 会话已接受: {Name} 来自 {RemoteEP}", name, remoteEP);
+            Log.Information("[NM2] 会话已接受: {Name} 来自 {RemoteEP} SSRC={SSRC:X8}", name, remoteEP, ssrc);
         }
         else if (status == NetworkMidi2Protocol.CommandStatus.Reply)
         {
@@ -196,11 +199,17 @@ public class NetworkMidi2Service : INetworkMidi2Service
                 session.State = NetworkMidi2Protocol.SessionState.Connected;
                 session.ReceiverSSRC = ssrc;
                 session.LastActivity = DateTime.Now;
+                
+                if (NetworkMidi2Protocol.ParseInvitation(data, out _, out _, out var remoteCaps))
+                {
+                    session.RemoteCapabilities = remoteCaps;
+                }
+                
                 _sessions[sessionId] = session;
 
                 AddDevice(session);
 
-                Log.Information("[NM2] 会话已建立: {RemoteName}", session.RemoteName);
+                Log.Information("[NM2] 会话已建立: {RemoteName} SSRC={SSRC:X8}", session.RemoteName, ssrc);
             }
         }
         else if (status == NetworkMidi2Protocol.CommandStatus.Error)
@@ -212,7 +221,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
         }
     }
 
-    private void HandleEndSession(IPEndPoint remoteEP, byte ssrc)
+    private void HandleEndSession(IPEndPoint remoteEP, uint ssrc)
     {
         string sessionId = GetSessionId(remoteEP);
 
@@ -224,7 +233,31 @@ public class NetworkMidi2Service : INetworkMidi2Service
         }
     }
 
-    private void HandlePing(NetworkMidi2Protocol.CommandStatus status, IPEndPoint remoteEP, byte ssrc, byte remoteSSRC)
+    private void HandleRetransmitRequest(byte[] data, IPEndPoint remoteEP, uint ssrc)
+    {
+        if (!NetworkMidi2Protocol.ParseRetransmitRequest(data, out var firstSequence, out var count))
+            return;
+
+        string sessionId = GetSessionId(remoteEP);
+        if (!_sessions.TryGetValue(sessionId, out var session))
+            return;
+
+        Log.Debug("[NM2] 重传请求: Seq={FirstSeq}, Count={Count}", firstSequence, count);
+
+        for (int i = 0; i < count; i++)
+        {
+            ushort seq = (ushort)(firstSequence + i);
+            int bufferIndex = (seq - 1) % session.RetransmitBuffer.Count;
+            
+            if (bufferIndex >= 0 && bufferIndex < session.RetransmitBuffer.Count)
+            {
+                var packet = session.RetransmitBuffer[bufferIndex];
+                SendPacket(packet, remoteEP);
+            }
+        }
+    }
+
+    private void HandlePing(NetworkMidi2Protocol.CommandStatus status, IPEndPoint remoteEP, uint ssrc, uint remoteSSRC)
     {
         string sessionId = GetSessionId(remoteEP);
 
@@ -261,9 +294,10 @@ public class NetworkMidi2Service : INetworkMidi2Service
                 RemotePort = remoteEP.Port,
                 State = NetworkMidi2Protocol.SessionState.Connected,
                 LastActivity = DateTime.Now,
+                SendSequence = 0,
                 ReceiveSequence = sequenceNumber,
-                PreviousReceiveSequence = 0,
                 RetransmitBuffer = new List<byte[]>(),
+                LocalCapabilities = NetworkMidi2Protocol.PeerCapabilities.All,
                 PacketsReceived = 1,
             };
             _sessions[sessionId] = session;
@@ -271,13 +305,19 @@ public class NetworkMidi2Service : INetworkMidi2Service
         }
         else
         {
-            CheckSequenceNumber(session, sequenceNumber);
-            session.LastActivity = DateTime.Now;
-            session.PacketsReceived++;
-            _sessions[sessionId] = session;
+            if (session.RemoteCapabilities.HasFlag(NetworkMidi2Protocol.PeerCapabilities.FEC))
+            {
+                ProcessFECPacket(data, session, remoteEP);
+            }
+            else
+            {
+                CheckSequenceNumber(session, sequenceNumber);
+                session.LastActivity = DateTime.Now;
+                session.PacketsReceived++;
+                _sessions[sessionId] = session;
+                ProcessUMPData(umpData, session);
+            }
         }
-
-        ProcessUMPData(umpData, session);
 
         string stableId = GetStableDeviceId(session.RemoteName, session.RemoteHost);
         if (InputDevices.FirstOrDefault(d => d.Id == stableId) is { } device)
@@ -285,6 +325,81 @@ public class NetworkMidi2Service : INetworkMidi2Service
             device.PulseTransmit();
             DeviceUpdated?.Invoke(this, device);
         }
+    }
+
+    private void ProcessFECPacket(byte[] data, NetworkMidi2Protocol.SessionInfo session, IPEndPoint remoteEP)
+    {
+        var packets = ParseFECMultiPackets(data);
+
+        foreach (var (seq, umpData) in packets)
+        {
+            CheckSequenceNumber(session, seq);
+
+            if (session.ReceiveSequence == seq)
+            {
+                session.LastActivity = DateTime.Now;
+                session.PacketsReceived++;
+                ProcessUMPData(umpData, session);
+            }
+            else if (IsSequenceNewer(seq, session.ReceiveSequence) || session.ReceiveSequence == 0)
+            {
+                session.LastActivity = DateTime.Now;
+                session.PacketsReceived++;
+                ProcessUMPData(umpData, session);
+            }
+            else
+            {
+                session.PacketsRecovered++;
+                Log.Debug("[NM2] FEC 恢复包: Seq={Seq}", seq);
+            }
+        }
+
+        _sessions[session.Id] = session;
+    }
+
+    private List<(ushort Sequence, byte[] UmpData)> ParseFECMultiPackets(byte[] data)
+    {
+        var result = new List<(ushort, byte[])>();
+
+        int offset = 0;
+        while (offset + 8 <= data.Length)
+        {
+            if (data[offset] != 0x10)
+            {
+                offset++;
+                continue;
+            }
+
+            ushort seq = (ushort)((data[offset + 1] << 8) | data[offset + 2]);
+
+            int umpStart = offset + 8;
+            int remaining = data.Length - umpStart;
+
+            if (remaining <= 0) break;
+
+            int umpLength = EstimateUMPLength(data, umpStart);
+            if (umpLength <= 0 || umpStart + umpLength > data.Length)
+            {
+                offset++;
+                continue;
+            }
+
+            var umpData = new byte[umpLength];
+            Buffer.BlockCopy(data, umpStart, umpData, 0, umpLength);
+
+            result.Add((seq, umpData));
+            offset = umpStart + umpLength;
+        }
+
+        return result;
+    }
+
+    private int EstimateUMPLength(byte[] data, int offset)
+    {
+        if (offset >= data.Length) return 0;
+
+        int messageType = (data[offset] >> 4) & 0x0F;
+        return NetworkMidi2Protocol.GetUMPPacketSize(messageType);
     }
 
     private void CheckSequenceNumber(NetworkMidi2Protocol.SessionInfo session, ushort sequenceNumber)
@@ -414,11 +529,12 @@ public class NetworkMidi2Service : INetworkMidi2Service
                 SendSequence = 0,
                 ReceiveSequence = 0,
                 RetransmitBuffer = new List<byte[]>(),
+                LocalCapabilities = NetworkMidi2Protocol.PeerCapabilities.All,
             };
 
             _sessions[sessionId] = session;
 
-            var invitePacket = NetworkMidi2Protocol.CreateInvitationPacket(_serviceName, _localSSRC, _productInstanceId);
+            var invitePacket = NetworkMidi2Protocol.CreateInvitationPacket(_serviceName, _localSSRC, _productInstanceId, NetworkMidi2Protocol.PeerCapabilities.All);
 
             for (int i = 0; i < NetworkMidi2Protocol.INVITATION_RETRY_COUNT; i++)
             {

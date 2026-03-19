@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace MidiBridge.Services.NetworkMidi2;
 
 public static class NetworkMidi2Protocol
@@ -18,6 +20,8 @@ public static class NetworkMidi2Protocol
         Invitation = 0x01,
         EndSession = 0x02,
         Ping = 0x03,
+        RetransmitRequest = 0x04,
+        RetransmitResponse = 0x05,
         UMPData = 0x10,
     }
 
@@ -47,27 +51,37 @@ public static class NetworkMidi2Protocol
         Connected,
     }
 
+    [Flags]
+    public enum PeerCapabilities : ushort
+    {
+        None = 0x0000,
+        Retransmission = 0x0001,
+        FEC = 0x0002,
+        All = Retransmission | FEC,
+    }
+
     public struct SessionInfo
     {
         public string Id;
         public string RemoteName;
         public string RemoteHost;
         public int RemotePort;
-        public byte SenderSSRC;
-        public byte ReceiverSSRC;
+        public uint SenderSSRC;
+        public uint ReceiverSSRC;
         public SessionState State;
         public DateTime LastActivity;
         public ushort SendSequence;
         public ushort ReceiveSequence;
         public ushort PreviousReceiveSequence;
         public List<byte[]> RetransmitBuffer;
-        public bool SupportsFEC;
-        public bool SupportsRetransmit;
+        public PeerCapabilities LocalCapabilities;
+        public PeerCapabilities RemoteCapabilities;
         public int PacketsSent;
         public int PacketsReceived;
         public int PacketsLost;
         public int PacketsOutOfOrder;
         public int PacketsDuplicate;
+        public int PacketsRecovered;
     }
 
     public class DiscoveredDevice
@@ -86,88 +100,146 @@ public static class NetworkMidi2Protocol
         public bool IsFEC;
     }
 
-    public static byte[] CreateSessionCommandPacket(SessionCommand command, CommandStatus status, byte ssrc, byte remoteSSRC = 0)
+    public static byte[] CreateSessionCommandPacket(SessionCommand command, CommandStatus status, uint ssrc, uint remoteSSRC = 0)
     {
-        var packet = new byte[4];
+        var packet = new byte[12];
         packet[0] = (byte)((byte)command & 0x0F);
         packet[1] = (byte)status;
-        packet[2] = ssrc;
-        packet[3] = remoteSSRC;
+        packet[2] = (byte)((ssrc >> 24) & 0xFF);
+        packet[3] = (byte)((ssrc >> 16) & 0xFF);
+        packet[4] = (byte)((ssrc >> 8) & 0xFF);
+        packet[5] = (byte)(ssrc & 0xFF);
+        packet[6] = (byte)((remoteSSRC >> 24) & 0xFF);
+        packet[7] = (byte)((remoteSSRC >> 16) & 0xFF);
+        packet[8] = (byte)((remoteSSRC >> 8) & 0xFF);
+        packet[9] = (byte)(remoteSSRC & 0xFF);
         return packet;
     }
 
-    public static byte[] CreateInvitationPacket(string name, byte ssrc, string productInstanceId = "")
+    public static byte[] CreateInvitationPacket(string name, uint ssrc, string productInstanceId = "", PeerCapabilities capabilities = PeerCapabilities.All)
     {
-        var nameBytes = System.Text.Encoding.UTF8.GetBytes(name);
-        var productBytes = System.Text.Encoding.UTF8.GetBytes(productInstanceId);
-        var packet = new byte[4 + 2 + nameBytes.Length + 2 + productBytes.Length];
+        var nameBytes = Encoding.UTF8.GetBytes(name);
+        var productBytes = Encoding.UTF8.GetBytes(productInstanceId);
+        var packet = new byte[16 + 2 + nameBytes.Length + 2 + productBytes.Length + 2];
 
         int offset = 0;
         packet[offset++] = (byte)SessionCommand.Invitation;
         packet[offset++] = (byte)CommandStatus.Command;
-        packet[offset++] = ssrc;
+        
+        packet[offset++] = (byte)((ssrc >> 24) & 0xFF);
+        packet[offset++] = (byte)((ssrc >> 16) & 0xFF);
+        packet[offset++] = (byte)((ssrc >> 8) & 0xFF);
+        packet[offset++] = (byte)(ssrc & 0xFF);
+
+        packet[offset++] = 0;
+        packet[offset++] = 0;
+        packet[offset++] = 0;
         packet[offset++] = 0;
 
         packet[offset++] = (byte)((nameBytes.Length >> 8) & 0xFF);
         packet[offset++] = (byte)(nameBytes.Length & 0xFF);
-        System.Buffer.BlockCopy(nameBytes, 0, packet, offset, nameBytes.Length);
+        Buffer.BlockCopy(nameBytes, 0, packet, offset, nameBytes.Length);
         offset += nameBytes.Length;
 
         packet[offset++] = (byte)((productBytes.Length >> 8) & 0xFF);
         packet[offset++] = (byte)(productBytes.Length & 0xFF);
         if (productBytes.Length > 0)
         {
-            System.Buffer.BlockCopy(productBytes, 0, packet, offset, productBytes.Length);
+            Buffer.BlockCopy(productBytes, 0, packet, offset, productBytes.Length);
+            offset += productBytes.Length;
         }
 
+        packet[offset++] = (byte)(((ushort)capabilities >> 8) & 0xFF);
+        packet[offset++] = (byte)((ushort)capabilities & 0xFF);
+
         return packet;
     }
 
-    public static byte[] CreateInvitationReplyPacket(byte ssrc, byte remoteSSRC)
+    public static byte[] CreateInvitationReplyPacket(uint ssrc, uint remoteSSRC, PeerCapabilities capabilities = PeerCapabilities.All)
     {
-        return CreateSessionCommandPacket(SessionCommand.Invitation, CommandStatus.Reply, ssrc, remoteSSRC);
-    }
-
-    public static byte[] CreateInvitationErrorPacket(byte ssrc, InvitationError error)
-    {
-        var packet = CreateSessionCommandPacket(SessionCommand.Invitation, CommandStatus.Error, ssrc);
+        var packet = new byte[16];
+        packet[0] = (byte)SessionCommand.Invitation;
+        packet[1] = (byte)CommandStatus.Reply;
+        packet[2] = (byte)((ssrc >> 24) & 0xFF);
+        packet[3] = (byte)((ssrc >> 16) & 0xFF);
+        packet[4] = (byte)((ssrc >> 8) & 0xFF);
+        packet[5] = (byte)(ssrc & 0xFF);
+        packet[6] = (byte)((remoteSSRC >> 24) & 0xFF);
+        packet[7] = (byte)((remoteSSRC >> 16) & 0xFF);
+        packet[8] = (byte)((remoteSSRC >> 8) & 0xFF);
+        packet[9] = (byte)(remoteSSRC & 0xFF);
+        packet[14] = (byte)(((ushort)capabilities >> 8) & 0xFF);
+        packet[15] = (byte)((ushort)capabilities & 0xFF);
         return packet;
     }
 
-    public static byte[] CreateEndSessionPacket(byte ssrc, byte remoteSSRC)
+    public static byte[] CreateInvitationErrorPacket(uint ssrc, InvitationError error)
+    {
+        var packet = new byte[12];
+        packet[0] = (byte)SessionCommand.Invitation;
+        packet[1] = (byte)CommandStatus.Error;
+        packet[2] = (byte)((ssrc >> 24) & 0xFF);
+        packet[3] = (byte)((ssrc >> 16) & 0xFF);
+        packet[4] = (byte)((ssrc >> 8) & 0xFF);
+        packet[5] = (byte)(ssrc & 0xFF);
+        packet[11] = (byte)error;
+        return packet;
+    }
+
+    public static byte[] CreateEndSessionPacket(uint ssrc, uint remoteSSRC)
     {
         return CreateSessionCommandPacket(SessionCommand.EndSession, CommandStatus.Command, ssrc, remoteSSRC);
     }
 
-    public static byte[] CreatePingPacket(byte ssrc, byte remoteSSRC)
+    public static byte[] CreatePingPacket(uint ssrc, uint remoteSSRC)
     {
         return CreateSessionCommandPacket(SessionCommand.Ping, CommandStatus.Command, ssrc, remoteSSRC);
     }
 
-    public static byte[] CreatePongPacket(byte ssrc, byte remoteSSRC)
+    public static byte[] CreatePongPacket(uint ssrc, uint remoteSSRC)
     {
         return CreateSessionCommandPacket(SessionCommand.Ping, CommandStatus.Reply, ssrc, remoteSSRC);
     }
 
+    public static byte[] CreateRetransmitRequestPacket(uint ssrc, uint remoteSSRC, ushort firstSequence, ushort count)
+    {
+        var packet = new byte[16];
+        packet[0] = (byte)SessionCommand.RetransmitRequest;
+        packet[1] = (byte)CommandStatus.Command;
+        packet[2] = (byte)((ssrc >> 24) & 0xFF);
+        packet[3] = (byte)((ssrc >> 16) & 0xFF);
+        packet[4] = (byte)((ssrc >> 8) & 0xFF);
+        packet[5] = (byte)(ssrc & 0xFF);
+        packet[6] = (byte)((remoteSSRC >> 24) & 0xFF);
+        packet[7] = (byte)((remoteSSRC >> 16) & 0xFF);
+        packet[8] = (byte)((remoteSSRC >> 8) & 0xFF);
+        packet[9] = (byte)(remoteSSRC & 0xFF);
+        packet[10] = (byte)((firstSequence >> 8) & 0xFF);
+        packet[11] = (byte)(firstSequence & 0xFF);
+        packet[12] = (byte)((count >> 8) & 0xFF);
+        packet[13] = (byte)(count & 0xFF);
+        return packet;
+    }
+
     public static byte[] CreateUMPDataPacket(ushort sequenceNumber, byte[] umpData)
     {
-        var packet = new byte[4 + umpData.Length];
+        var packet = new byte[8 + umpData.Length];
         packet[0] = (byte)SessionCommand.UMPData;
         packet[1] = (byte)((sequenceNumber >> 8) & 0xFF);
         packet[2] = (byte)(sequenceNumber & 0xFF);
         packet[3] = 0;
-        System.Buffer.BlockCopy(umpData, 0, packet, 4, umpData.Length);
+        Buffer.BlockCopy(umpData, 0, packet, 8, umpData.Length);
         return packet;
     }
 
-    public static bool ParsePacket(byte[] data, out SessionCommand command, out CommandStatus status, out byte ssrc, out byte remoteSSRC)
+    public static bool ParsePacket(byte[] data, out SessionCommand command, out CommandStatus status, out uint ssrc, out uint remoteSSRC)
     {
         command = default;
         status = default;
         ssrc = 0;
         remoteSSRC = 0;
 
-        if (data == null || data.Length < 4) return false;
+        if (data == null || data.Length < 12) return false;
 
         byte cmdByte = data[0];
         
@@ -181,38 +253,63 @@ public static class NetworkMidi2Protocol
         }
         
         status = (CommandStatus)data[1];
-        ssrc = data[2];
-        remoteSSRC = data[3];
+        ssrc = (uint)((data[2] << 24) | (data[3] << 16) | (data[4] << 8) | data[5]);
+        
+        if (data.Length >= 10)
+        {
+            remoteSSRC = (uint)((data[6] << 24) | (data[7] << 16) | (data[8] << 8) | data[9]);
+        }
 
         return true;
     }
 
-    public static bool ParseInvitation(byte[] data, out string name, out string productInstanceId)
+    public static bool ParseInvitation(byte[] data, out string name, out string productInstanceId, out PeerCapabilities capabilities)
     {
         name = "";
         productInstanceId = "";
+        capabilities = PeerCapabilities.None;
 
-        if (data == null || data.Length < 6) return false;
+        if (data == null || data.Length < 16) return false;
 
-        int offset = 4;
+        int offset = 16;
+
+        if (offset + 2 > data.Length) return true;
         int nameLength = (data[offset] << 8) | data[offset + 1];
         offset += 2;
 
         if (offset + nameLength > data.Length) return false;
 
-        name = System.Text.Encoding.UTF8.GetString(data, offset, nameLength);
+        name = Encoding.UTF8.GetString(data, offset, nameLength);
         offset += nameLength;
 
         if (offset + 2 > data.Length) return true;
-
         int productLength = (data[offset] << 8) | data[offset + 1];
         offset += 2;
 
         if (offset + productLength <= data.Length && productLength > 0)
         {
-            productInstanceId = System.Text.Encoding.UTF8.GetString(data, offset, productLength);
+            productInstanceId = Encoding.UTF8.GetString(data, offset, productLength);
+            offset += productLength;
         }
 
+        if (offset + 2 <= data.Length)
+        {
+            capabilities = (PeerCapabilities)((data[offset] << 8) | data[offset + 1]);
+        }
+
+        return true;
+    }
+
+    public static bool ParseRetransmitRequest(byte[] data, out ushort firstSequence, out ushort count)
+    {
+        firstSequence = 0;
+        count = 0;
+
+        if (data == null || data.Length < 14) return false;
+        if ((SessionCommand)data[0] != SessionCommand.RetransmitRequest) return false;
+
+        firstSequence = (ushort)((data[10] << 8) | data[11]);
+        count = (ushort)((data[12] << 8) | data[13]);
         return true;
     }
 
@@ -221,12 +318,12 @@ public static class NetworkMidi2Protocol
         sequenceNumber = 0;
         umpData = Array.Empty<byte>();
 
-        if (data == null || data.Length < 5) return false;
+        if (data == null || data.Length < 12) return false;
         if (data[0] != 0x10) return false;
 
         sequenceNumber = (ushort)((data[1] << 8) | data[2]);
-        umpData = new byte[data.Length - 4];
-        System.Buffer.BlockCopy(data, 4, umpData, 0, umpData.Length);
+        umpData = new byte[data.Length - 8];
+        Buffer.BlockCopy(data, 8, umpData, 0, umpData.Length);
 
         return true;
     }
