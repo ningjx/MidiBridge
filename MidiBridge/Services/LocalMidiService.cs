@@ -252,12 +252,22 @@ public class LocalMidiService : ILocalMidiService
                 midiIn.Stop();
                 midiIn.Dispose();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "[LocalMidi] 释放输入设备失败");
+            }
         }
 
         foreach (var midiOut in _localOutputs.Values)
         {
-            try { midiOut.Dispose(); } catch { }
+            try
+            {
+                midiOut.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "[LocalMidi] 释放输出设备失败");
+            }
         }
 
         _localInputs.Clear();

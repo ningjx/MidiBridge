@@ -299,7 +299,10 @@ public class RtpMidiService : IRtpMidiService
 
             _controlServer?.Send(packet, packet.Length, remoteEP);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "[RTP] 发送邀请响应失败: {RemoteEP}", remoteEP);
+        }
     }
 
     private void SendSyncResponse(byte[] data, IPEndPoint remoteEP, bool isDataPort = false)
@@ -312,7 +315,7 @@ public class RtpMidiService : IRtpMidiService
             packet[2] = (byte)'C';
             packet[3] = (byte)'K';
             WriteBigEndianUInt32(packet, 4, (uint)Random.Shared.Next());
-            
+
             var count = BitConverter.GetBytes(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             if (BitConverter.IsLittleEndian) Array.Reverse(count);
             Buffer.BlockCopy(count, 0, packet, 8, 4);
@@ -326,7 +329,10 @@ public class RtpMidiService : IRtpMidiService
                 _controlServer?.Send(packet, packet.Length, remoteEP);
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "[RTP] 发送同步响应失败: {RemoteEP}", remoteEP);
+        }
     }
 
     private byte[] CreateMidiPacket(byte[] midiData)

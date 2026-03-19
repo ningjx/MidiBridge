@@ -101,7 +101,10 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
             var multicastAddr = IPAddress.Parse(MDNS_MULTICAST_ADDRESS);
             _mdnsClient?.DropMulticastGroup(multicastAddr);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "[mDNS] 退出多播组失败");
+        }
 
         _mdnsClient?.Close();
         _mdnsClient?.Dispose();
@@ -261,7 +264,7 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
     private bool IsLocalAddress(IPAddress address)
     {
         if (IPAddress.IsLoopback(address)) return true;
-        
+
         try
         {
             var host = Dns.GetHostEntry(Dns.GetHostName());
@@ -271,8 +274,11 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
                     return true;
             }
         }
-        catch { }
-        
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "[mDNS] 获取本地主机信息失败");
+        }
+
         return false;
     }
 

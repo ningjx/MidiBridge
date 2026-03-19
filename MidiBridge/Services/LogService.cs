@@ -60,6 +60,9 @@ public static class LogService
             Log.Information("=== MidiBridge 停止 ===");
             Log.CloseAndFlush();
         }
-        catch { }
+        catch (Exception)
+        {
+            // 日志系统关闭时忽略错误
+        }
     }
 }

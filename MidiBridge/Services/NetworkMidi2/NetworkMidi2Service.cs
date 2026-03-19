@@ -479,7 +479,10 @@ public class NetworkMidi2Service : INetworkMidi2Service
             var packet = NetworkMidi2Protocol.CreateEndSessionPacket(_localSSRC, session.SenderSSRC);
             SendPacket(packet, ep);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "[NM2] 结束会话失败: {Host}:{Port}", session.RemoteHost, session.RemotePort);
+        }
     }
 
     private void SendPacket(byte[] data, IPEndPoint endpoint)
@@ -512,7 +515,10 @@ public class NetworkMidi2Service : INetworkMidi2Service
                             var pingPacket = NetworkMidi2Protocol.CreatePingPacket(_localSSRC, session.SenderSSRC);
                             SendPacket(pingPacket, ep);
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            Log.Debug(ex, "[NM2] Ping 发送失败: {Host}:{Port}", session.RemoteHost, session.RemotePort);
+                        }
                     }
                 }
             }
@@ -565,7 +571,10 @@ public class NetworkMidi2Service : INetworkMidi2Service
                 DeviceAdded?.Invoke(this, device);
             });
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "[NM2] 添加设备失败");
+        }
     }
 
     private void RemoveDevice(string sessionId)
@@ -582,7 +591,10 @@ public class NetworkMidi2Service : INetworkMidi2Service
                 }
             });
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "[NM2] 移除设备失败: {SessionId}", sessionId);
+        }
     }
 
     private void OnStatusChanged(string message)
