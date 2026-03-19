@@ -142,6 +142,17 @@ public static class NetworkMidi2Protocol
         public bool NeedsAllNotesOff;
         public string CryptoNonce;
         public bool SupportsRetransmit;
+
+        public int AuthFailCount;
+        public DateTime LastAuthFail;
+        public int AuthDelayMs;
+        public string PendingUsername;
+    }
+
+    public class AuthCredentials
+    {
+        public string SharedSecret { get; set; } = "";
+        public Dictionary<string, string> Users { get; set; } = new();
     }
 
     public class DiscoveredDevice
@@ -322,6 +333,159 @@ public static class NetworkMidi2Protocol
         }
 
         return packet;
+    }
+
+    public static byte[] CreateInvitationReplyUserAuthRequired(string cryptoNonce, string umpEndpointName, string productInstanceId, AuthenticationState authState = AuthenticationState.FirstAuthRequest)
+    {
+        var nameBytes = Encoding.UTF8.GetBytes(umpEndpointName);
+        var productBytes = Encoding.ASCII.GetBytes(productInstanceId);
+        var nonceBytes = Encoding.ASCII.GetBytes(cryptoNonce.PadRight(16).Substring(0, 16));
+
+        int nameWords = (nameBytes.Length + 3) / 4;
+        int productWords = (productBytes.Length + 3) / 4;
+        int payloadWords = 4 + nameWords + productWords;
+
+        var packet = new byte[4 + payloadWords * 4];
+        int offset = 0;
+
+        packet[offset++] = (byte)CommandCode.InvitationReplyUserAuthRequired;
+        packet[offset++] = (byte)payloadWords;
+        packet[offset++] = (byte)nameWords;
+        packet[offset++] = (byte)authState;
+
+        Buffer.BlockCopy(nonceBytes, 0, packet, offset, 16);
+        offset += 16;
+
+        Buffer.BlockCopy(nameBytes, 0, packet, offset, nameBytes.Length);
+        offset += nameWords * 4;
+
+        if (productBytes.Length > 0)
+        {
+            Buffer.BlockCopy(productBytes, 0, packet, offset, productBytes.Length);
+        }
+
+        return packet;
+    }
+
+    public static byte[] CreateInvitationWithAuth(byte[] authDigest)
+    {
+        var packet = new byte[36];
+        packet[0] = (byte)CommandCode.InvitationWithAuth;
+        packet[1] = 8;
+        packet[2] = 0;
+        packet[3] = 0;
+
+        Buffer.BlockCopy(authDigest, 0, packet, 4, 32);
+
+        return packet;
+    }
+
+    public static byte[] CreateInvitationWithUserAuth(byte[] authDigest, string username)
+    {
+        var usernameBytes = Encoding.UTF8.GetBytes(username);
+        int usernameWords = (usernameBytes.Length + 3) / 4;
+        int payloadWords = 8 + usernameWords;
+
+        var packet = new byte[4 + payloadWords * 4];
+        int offset = 0;
+
+        packet[offset++] = (byte)CommandCode.InvitationWithUserAuth;
+        packet[offset++] = (byte)payloadWords;
+        packet[offset++] = 0;
+        packet[offset++] = 0;
+
+        Buffer.BlockCopy(authDigest, 0, packet, offset, 32);
+        offset += 32;
+
+        if (usernameBytes.Length > 0)
+        {
+            Buffer.BlockCopy(usernameBytes, 0, packet, offset, usernameBytes.Length);
+        }
+
+        return packet;
+    }
+
+    public static byte[] ComputeAuthDigest(string cryptoNonce, string sharedSecret)
+    {
+        var data = cryptoNonce + sharedSecret;
+        using var sha256 = System.Security.Cryptography.SHA256.Create();
+        return sha256.ComputeHash(Encoding.UTF8.GetBytes(data));
+    }
+
+    public static byte[] ComputeUserAuthDigest(string cryptoNonce, string username, string password)
+    {
+        var data = cryptoNonce + username + password;
+        using var sha256 = System.Security.Cryptography.SHA256.Create();
+        return sha256.ComputeHash(Encoding.UTF8.GetBytes(data));
+    }
+
+    public static string GenerateCryptoNonce()
+    {
+        const string chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?";
+        var random = Random.Shared;
+        var nonce = new char[16];
+        for (int i = 0; i < 16; i++)
+        {
+            nonce[i] = chars[random.Next(chars.Length)];
+        }
+        return new string(nonce);
+    }
+
+    public static bool ParseInvitationWithAuth(byte[] payload, out byte[] authDigest)
+    {
+        authDigest = Array.Empty<byte>();
+
+        if (payload == null || payload.Length < 36) return false;
+
+        authDigest = new byte[32];
+        Buffer.BlockCopy(payload, 4, authDigest, 0, 32);
+        return true;
+    }
+
+    public static bool ParseInvitationWithUserAuth(byte[] payload, out byte[] authDigest, out string username)
+    {
+        authDigest = Array.Empty<byte>();
+        username = "";
+
+        if (payload == null || payload.Length < 36) return false;
+
+        authDigest = new byte[32];
+        Buffer.BlockCopy(payload, 4, authDigest, 0, 32);
+
+        if (payload.Length > 36)
+        {
+            int usernameLen = payload.Length - 36;
+            username = Encoding.UTF8.GetString(payload, 36, usernameLen).TrimEnd('\0');
+        }
+
+        return true;
+    }
+
+    public static bool ParseInvitationReplyAuthRequired(byte[] payload, byte nameWords, out string cryptoNonce, out string umpEndpointName, out string productInstanceId, out AuthenticationState authState)
+    {
+        cryptoNonce = "";
+        umpEndpointName = "";
+        productInstanceId = "";
+        authState = AuthenticationState.FirstAuthRequest;
+
+        if (payload == null || payload.Length < 20) return false;
+
+        authState = (AuthenticationState)payload[3];
+        cryptoNonce = Encoding.ASCII.GetString(payload, 4, 16).TrimEnd('\0');
+
+        int nameLen = nameWords * 4;
+        if (payload.Length < 20 + nameLen) return false;
+
+        umpEndpointName = TrimString(Encoding.UTF8.GetString(payload, 20, nameLen));
+
+        int productOffset = 20 + nameLen;
+        int productLen = payload.Length - productOffset;
+        if (productLen > 0)
+        {
+            productInstanceId = TrimString(Encoding.ASCII.GetString(payload, productOffset, productLen));
+        }
+
+        return true;
     }
 
     public static byte[] CreatePingCommand(uint pingId)

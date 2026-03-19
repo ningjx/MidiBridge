@@ -34,7 +34,17 @@ public class NetworkMidi2Service : INetworkMidi2Service
     public event EventHandler<(string SessionId, string DeviceName, string Host, int Port)>? InvitationReceived;
     public event EventHandler<(string SessionId, int LostPackets)>? RetransmitErrorReceived;
 
+    public event EventHandler<(string SessionId, string CryptoNonce, bool RequireUserAuth)>? AuthenticationRequired;
+    public event EventHandler<(string SessionId, string DeviceName, bool Success)>? AuthenticationResult;
+
     public int MaxSessions { get; set; } = NetworkMidi2Protocol.MAX_SESSIONS;
+    public bool RequireAuthentication { get; set; } = false;
+    public bool RequireUserAuthentication { get; set; } = false;
+    public string SharedSecret { get; set; } = "";
+    public Dictionary<string, string> AuthorizedUsers { get; } = new();
+
+    private readonly ConcurrentDictionary<string, string> _pendingCryptoNonces = new();
+    private readonly ConcurrentDictionary<string, int> _authFailCounts = new();
 
     public ObservableCollection<MidiDevice> InputDevices { get; } = new();
     public ObservableCollection<MidiDevice> OutputDevices { get; } = new();
@@ -166,6 +176,14 @@ public class NetworkMidi2Service : INetworkMidi2Service
                 HandleInvitation(cmdPacket, payload, cmdSpecific1, remoteEP, sessionId);
                 break;
 
+            case NetworkMidi2Protocol.CommandCode.InvitationWithAuth:
+                HandleInvitationWithAuth(payload, remoteEP, sessionId);
+                break;
+
+            case NetworkMidi2Protocol.CommandCode.InvitationWithUserAuth:
+                HandleInvitationWithUserAuth(payload, remoteEP, sessionId);
+                break;
+
             case NetworkMidi2Protocol.CommandCode.InvitationReplyAccepted:
                 HandleInvitationReplyAccepted(payload, cmdSpecific1, remoteEP, sessionId);
                 break;
@@ -176,6 +194,10 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
             case NetworkMidi2Protocol.CommandCode.InvitationReplyAuthRequired:
                 HandleInvitationReplyAuthRequired(payload, cmdSpecific1, remoteEP, sessionId);
+                break;
+
+            case NetworkMidi2Protocol.CommandCode.InvitationReplyUserAuthRequired:
+                HandleInvitationReplyUserAuthRequired(payload, cmdSpecific1, remoteEP, sessionId);
                 break;
 
             case NetworkMidi2Protocol.CommandCode.Ping:
@@ -248,6 +270,29 @@ public class NetworkMidi2Service : INetworkMidi2Service
             return;
         }
 
+        bool clientSupportsAuth = capabilities.HasFlag(NetworkMidi2Protocol.InvitationCapabilities.SupportsAuth);
+        bool clientSupportsUserAuth = capabilities.HasFlag(NetworkMidi2Protocol.InvitationCapabilities.SupportsUserAuth);
+
+        if (RequireAuthentication && clientSupportsAuth && !RequireUserAuthentication)
+        {
+            SendAuthRequired(sessionId, name, remoteEP, capabilities, false);
+            return;
+        }
+
+        if (RequireUserAuthentication && clientSupportsUserAuth)
+        {
+            SendAuthRequired(sessionId, name, remoteEP, capabilities, true);
+            return;
+        }
+
+        if ((RequireAuthentication || RequireUserAuthentication) && !clientSupportsAuth && !clientSupportsUserAuth)
+        {
+            var bye = NetworkMidi2Protocol.CreateByeCommand(NetworkMidi2Protocol.ByeReason.NoMatchingAuthMethod);
+            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(bye), remoteEP);
+            Log.Warning("[NM2] 拒绝连接: 客户端不支持认证");
+            return;
+        }
+
         bool userAccepted = OnInvitationReceived(sessionId, name, remoteEP.Address.ToString(), remoteEP.Port);
 
         if (!userAccepted)
@@ -270,6 +315,211 @@ public class NetworkMidi2Service : INetworkMidi2Service
             return;
         }
 
+        AcceptSession(sessionId, name, remoteEP, capabilities);
+    }
+
+    private void SendAuthRequired(string sessionId, string name, IPEndPoint remoteEP, NetworkMidi2Protocol.InvitationCapabilities capabilities, bool requireUserAuth)
+    {
+        string cryptoNonce = NetworkMidi2Protocol.GenerateCryptoNonce();
+        _pendingCryptoNonces[sessionId] = cryptoNonce;
+
+        var session = new NetworkMidi2Protocol.SessionInfo
+        {
+            Id = sessionId,
+            RemoteName = name,
+            RemoteHost = remoteEP.Address.ToString(),
+            RemotePort = remoteEP.Port,
+            State = NetworkMidi2Protocol.SessionState.AuthenticationRequired,
+            LastActivity = DateTime.Now,
+            RemoteCapabilities = capabilities,
+            CryptoNonce = cryptoNonce,
+            AuthFailCount = 0,
+            AuthDelayMs = 100,
+        };
+        _sessions[sessionId] = session;
+
+        byte[] reply;
+        if (requireUserAuth)
+        {
+            reply = NetworkMidi2Protocol.CreateInvitationReplyUserAuthRequired(cryptoNonce, _serviceName, _productInstanceId);
+        }
+        else
+        {
+            reply = NetworkMidi2Protocol.CreateInvitationReplyAuthRequired(cryptoNonce, _serviceName, _productInstanceId);
+        }
+        SendPacket(NetworkMidi2Protocol.CreateUDPPacket(reply), remoteEP);
+
+        Log.Information("[NM2] 已发送认证要求: {Name}, UserAuth={UserAuth}", name, requireUserAuth);
+    }
+
+    private void HandleInvitationWithAuth(byte[] payload, IPEndPoint remoteEP, string sessionId)
+    {
+        if (!NetworkMidi2Protocol.ParseInvitationWithAuth(payload, out var clientDigest))
+        {
+            SendNAK(remoteEP, NetworkMidi2Protocol.NAKReason.CommandMalformed);
+            return;
+        }
+
+        if (!_sessions.TryGetValue(sessionId, out var session))
+        {
+            var bye = NetworkMidi2Protocol.CreateByeCommand(NetworkMidi2Protocol.ByeReason.InvitationAuthRejected);
+            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(bye), remoteEP);
+            return;
+        }
+
+        if (session.State != NetworkMidi2Protocol.SessionState.AuthenticationRequired)
+        {
+            SendNAK(remoteEP, NetworkMidi2Protocol.NAKReason.CommandNotExpected);
+            return;
+        }
+
+        if (!_pendingCryptoNonces.TryGetValue(sessionId, out var cryptoNonce))
+        {
+            var bye = NetworkMidi2Protocol.CreateByeCommand(NetworkMidi2Protocol.ByeReason.InvitationAuthRejected);
+            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(bye), remoteEP);
+            return;
+        }
+
+        var expectedDigest = NetworkMidi2Protocol.ComputeAuthDigest(cryptoNonce, SharedSecret);
+
+        if (CompareDigests(clientDigest, expectedDigest))
+        {
+            _pendingCryptoNonces.TryRemove(sessionId, out _);
+            _authFailCounts.TryRemove(sessionId, out _);
+
+            AuthenticationResult?.Invoke(this, (sessionId, session.RemoteName, true));
+
+            AcceptSession(sessionId, session.RemoteName, remoteEP, session.RemoteCapabilities);
+            Log.Information("[NM2] 认证成功: {Name}", session.RemoteName);
+        }
+        else
+        {
+            HandleAuthFailure(sessionId, session, remoteEP, false);
+        }
+    }
+
+    private void HandleInvitationWithUserAuth(byte[] payload, IPEndPoint remoteEP, string sessionId)
+    {
+        if (!NetworkMidi2Protocol.ParseInvitationWithUserAuth(payload, out var clientDigest, out var username))
+        {
+            SendNAK(remoteEP, NetworkMidi2Protocol.NAKReason.CommandMalformed);
+            return;
+        }
+
+        if (!_sessions.TryGetValue(sessionId, out var session))
+        {
+            var bye = NetworkMidi2Protocol.CreateByeCommand(NetworkMidi2Protocol.ByeReason.InvitationAuthRejected);
+            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(bye), remoteEP);
+            return;
+        }
+
+        if (session.State != NetworkMidi2Protocol.SessionState.AuthenticationRequired)
+        {
+            SendNAK(remoteEP, NetworkMidi2Protocol.NAKReason.CommandNotExpected);
+            return;
+        }
+
+        if (!_pendingCryptoNonces.TryGetValue(sessionId, out var cryptoNonce))
+        {
+            var bye = NetworkMidi2Protocol.CreateByeCommand(NetworkMidi2Protocol.ByeReason.InvitationAuthRejected);
+            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(bye), remoteEP);
+            return;
+        }
+
+        if (!AuthorizedUsers.TryGetValue(username, out var password))
+        {
+            var reply = NetworkMidi2Protocol.CreateInvitationReplyUserAuthRequired(
+                cryptoNonce, _serviceName, _productInstanceId,
+                NetworkMidi2Protocol.AuthenticationState.UsernameNotFound);
+            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(reply), remoteEP);
+
+            Log.Warning("[NM2] 用户不存在: {Username}", username);
+            AuthenticationResult?.Invoke(this, (sessionId, session.RemoteName, false));
+            return;
+        }
+
+        var expectedDigest = NetworkMidi2Protocol.ComputeUserAuthDigest(cryptoNonce, username, password);
+
+        if (CompareDigests(clientDigest, expectedDigest))
+        {
+            _pendingCryptoNonces.TryRemove(sessionId, out _);
+            _authFailCounts.TryRemove(sessionId, out _);
+
+            AuthenticationResult?.Invoke(this, (sessionId, session.RemoteName, true));
+
+            AcceptSession(sessionId, session.RemoteName, remoteEP, session.RemoteCapabilities);
+            Log.Information("[NM2] 用户认证成功: {Name}, User={User}", session.RemoteName, username);
+        }
+        else
+        {
+            HandleAuthFailure(sessionId, session, remoteEP, true);
+        }
+    }
+
+    private async void HandleAuthFailure(string sessionId, NetworkMidi2Protocol.SessionInfo session, IPEndPoint remoteEP, bool isUserAuth)
+    {
+        session.AuthFailCount++;
+        session.LastAuthFail = DateTime.Now;
+
+        int failCount = _authFailCounts.AddOrUpdate(sessionId, 1, (_, c) => c + 1);
+        int delayMs = Math.Min(100 * (int)Math.Pow(2, failCount - 1), 30000);
+
+        session.AuthDelayMs = delayMs;
+        _sessions[sessionId] = session;
+
+        await Task.Delay(delayMs);
+
+        if (!_pendingCryptoNonces.TryGetValue(sessionId, out var cryptoNonce))
+        {
+            var bye = NetworkMidi2Protocol.CreateByeCommand(NetworkMidi2Protocol.ByeReason.AuthenticationFailed);
+            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(bye), remoteEP);
+            _sessions.TryRemove(sessionId, out _);
+            return;
+        }
+
+        if (failCount >= 5)
+        {
+            var bye = NetworkMidi2Protocol.CreateByeCommand(NetworkMidi2Protocol.ByeReason.AuthenticationFailed);
+            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(bye), remoteEP);
+            _sessions.TryRemove(sessionId, out _);
+            _pendingCryptoNonces.TryRemove(sessionId, out _);
+            _authFailCounts.TryRemove(sessionId, out _);
+            Log.Warning("[NM2] 认证失败次数过多: {Name}", session.RemoteName);
+            AuthenticationResult?.Invoke(this, (sessionId, session.RemoteName, false));
+            return;
+        }
+
+        byte[] reply;
+        if (isUserAuth)
+        {
+            reply = NetworkMidi2Protocol.CreateInvitationReplyUserAuthRequired(
+                cryptoNonce, _serviceName, _productInstanceId,
+                NetworkMidi2Protocol.AuthenticationState.AuthDigestIncorrect);
+        }
+        else
+        {
+            reply = NetworkMidi2Protocol.CreateInvitationReplyAuthRequired(
+                cryptoNonce, _serviceName, _productInstanceId,
+                NetworkMidi2Protocol.AuthenticationState.AuthDigestIncorrect);
+        }
+        SendPacket(NetworkMidi2Protocol.CreateUDPPacket(reply), remoteEP);
+
+        Log.Warning("[NM2] 认证失败: {Name}, 失败次数={Count}, 延迟={Delay}ms", session.RemoteName, failCount, delayMs);
+        AuthenticationResult?.Invoke(this, (sessionId, session.RemoteName, false));
+    }
+
+    private static bool CompareDigests(byte[] a, byte[] b)
+    {
+        if (a == null || b == null || a.Length != b.Length) return false;
+        for (int i = 0; i < a.Length; i++)
+        {
+            if (a[i] != b[i]) return false;
+        }
+        return true;
+    }
+
+    private void AcceptSession(string sessionId, string name, IPEndPoint remoteEP, NetworkMidi2Protocol.InvitationCapabilities capabilities)
+    {
         var session = new NetworkMidi2Protocol.SessionInfo
         {
             Id = sessionId,
@@ -387,12 +637,107 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
     private void HandleInvitationReplyAuthRequired(byte[] payload, byte nameWords, IPEndPoint remoteEP, string sessionId)
     {
-        Log.Warning("[NM2] 收到认证要求，当前不支持认证: {SessionId}", sessionId);
-
-        if (_sessions.TryRemove(sessionId, out _))
+        if (!NetworkMidi2Protocol.ParseInvitationReplyAuthRequired(payload, nameWords, out var cryptoNonce, out var umpEndpointName, out var productInstanceId, out var authState))
         {
-            var bye = NetworkMidi2Protocol.CreateByeCommand(NetworkMidi2Protocol.ByeReason.NoMatchingAuthMethod);
-            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(bye), remoteEP);
+            SendNAK(remoteEP, NetworkMidi2Protocol.NAKReason.CommandMalformed);
+            return;
+        }
+
+        if (!_sessions.TryGetValue(sessionId, out var session))
+        {
+            SendNAK(remoteEP, NetworkMidi2Protocol.NAKReason.CommandNotExpected);
+            return;
+        }
+
+        if (session.State != NetworkMidi2Protocol.SessionState.PendingInvitation)
+        {
+            SendNAK(remoteEP, NetworkMidi2Protocol.NAKReason.CommandNotExpected);
+            return;
+        }
+
+        session.State = NetworkMidi2Protocol.SessionState.AuthenticationRequired;
+        session.CryptoNonce = cryptoNonce;
+        session.LastActivity = DateTime.Now;
+        _sessions[sessionId] = session;
+
+        AuthenticationRequired?.Invoke(this, (sessionId, cryptoNonce, false));
+
+        Log.Information("[NM2] 收到认证要求: {Name}, CryptoNonce={Nonce}, State={State}", session.RemoteName, cryptoNonce, authState);
+    }
+
+    private void HandleInvitationReplyUserAuthRequired(byte[] payload, byte nameWords, IPEndPoint remoteEP, string sessionId)
+    {
+        if (!NetworkMidi2Protocol.ParseInvitationReplyAuthRequired(payload, nameWords, out var cryptoNonce, out var umpEndpointName, out var productInstanceId, out var authState))
+        {
+            SendNAK(remoteEP, NetworkMidi2Protocol.NAKReason.CommandMalformed);
+            return;
+        }
+
+        if (!_sessions.TryGetValue(sessionId, out var session))
+        {
+            SendNAK(remoteEP, NetworkMidi2Protocol.NAKReason.CommandNotExpected);
+            return;
+        }
+
+        if (session.State != NetworkMidi2Protocol.SessionState.PendingInvitation &&
+            session.State != NetworkMidi2Protocol.SessionState.AuthenticationRequired)
+        {
+            SendNAK(remoteEP, NetworkMidi2Protocol.NAKReason.CommandNotExpected);
+            return;
+        }
+
+        session.State = NetworkMidi2Protocol.SessionState.AuthenticationRequired;
+        session.CryptoNonce = cryptoNonce;
+        session.LastActivity = DateTime.Now;
+        _sessions[sessionId] = session;
+
+        AuthenticationRequired?.Invoke(this, (sessionId, cryptoNonce, true));
+
+        Log.Information("[NM2] 收到用户认证要求: {Name}, CryptoNonce={Nonce}, State={State}", session.RemoteName, cryptoNonce, authState);
+    }
+
+    public void SendAuthentication(string sessionId, string sharedSecret)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session)) return;
+        if (session.State != NetworkMidi2Protocol.SessionState.AuthenticationRequired) return;
+        if (string.IsNullOrEmpty(session.CryptoNonce)) return;
+
+        try
+        {
+            var ep = new IPEndPoint(IPAddress.Parse(session.RemoteHost), session.RemotePort);
+            var digest = NetworkMidi2Protocol.ComputeAuthDigest(session.CryptoNonce, sharedSecret);
+            var cmd = NetworkMidi2Protocol.CreateInvitationWithAuth(digest);
+            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(cmd), ep);
+
+            Log.Information("[NM2] 已发送认证: {SessionId}", sessionId);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[NM2] 发送认证失败");
+        }
+    }
+
+    public void SendUserAuthentication(string sessionId, string username, string password)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session)) return;
+        if (session.State != NetworkMidi2Protocol.SessionState.AuthenticationRequired) return;
+        if (string.IsNullOrEmpty(session.CryptoNonce)) return;
+
+        try
+        {
+            var ep = new IPEndPoint(IPAddress.Parse(session.RemoteHost), session.RemotePort);
+            var digest = NetworkMidi2Protocol.ComputeUserAuthDigest(session.CryptoNonce, username, password);
+            var cmd = NetworkMidi2Protocol.CreateInvitationWithUserAuth(digest, username);
+            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(cmd), ep);
+
+            session.PendingUsername = username;
+            _sessions[sessionId] = session;
+
+            Log.Information("[NM2] 已发送用户认证: {SessionId}, User={User}", sessionId, username);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[NM2] 发送用户认证失败");
         }
     }
 
@@ -804,8 +1149,8 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
             _sessions[sessionId] = session;
 
-            var invite = NetworkMidi2Protocol.CreateInvitationCommand(
-                _serviceName, _productInstanceId, NetworkMidi2Protocol.InvitationCapabilities.None);
+            var capabilities = NetworkMidi2Protocol.InvitationCapabilities.All;
+            var invite = NetworkMidi2Protocol.CreateInvitationCommand(_serviceName, _productInstanceId, capabilities);
 
             for (int i = 0; i < NetworkMidi2Protocol.INVITATION_RETRY_COUNT; i++)
             {
@@ -813,9 +1158,17 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
                 await Task.Delay(NetworkMidi2Protocol.INVITATION_RETRY_INTERVAL_MS);
 
-                if (_sessions.TryGetValue(sessionId, out var s) && s.State == NetworkMidi2Protocol.SessionState.Established)
+                if (_sessions.TryGetValue(sessionId, out var s))
                 {
-                    return true;
+                    if (s.State == NetworkMidi2Protocol.SessionState.Established)
+                    {
+                        return true;
+                    }
+                    if (s.State == NetworkMidi2Protocol.SessionState.AuthenticationRequired)
+                    {
+                        OnStatusChanged($"需要认证: {host}:{port}");
+                        return false;
+                    }
                 }
             }
 

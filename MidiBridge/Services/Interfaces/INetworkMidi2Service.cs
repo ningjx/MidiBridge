@@ -92,6 +92,41 @@ public interface INetworkMidi2Service : IDisposable
     int MaxSessions { get; set; }
 
     /// <summary>
+    /// 获取或设置是否需要密码认证。
+    /// </summary>
+    bool RequireAuthentication { get; set; }
+
+    /// <summary>
+    /// 获取或设置是否需要用户认证。
+    /// </summary>
+    bool RequireUserAuthentication { get; set; }
+
+    /// <summary>
+    /// 获取或设置共享密钥。
+    /// </summary>
+    string SharedSecret { get; set; }
+
+    /// <summary>
+    /// 获取授权用户列表（用户名->密码）。
+    /// </summary>
+    Dictionary<string, string> AuthorizedUsers { get; }
+
+    /// <summary>
+    /// 发送密码认证。
+    /// </summary>
+    /// <param name="sessionId">会话ID。</param>
+    /// <param name="sharedSecret">共享密钥。</param>
+    void SendAuthentication(string sessionId, string sharedSecret);
+
+    /// <summary>
+    /// 发送用户认证。
+    /// </summary>
+    /// <param name="sessionId">会话ID。</param>
+    /// <param name="username">用户名。</param>
+    /// <param name="password">密码。</param>
+    void SendUserAuthentication(string sessionId, string username, string password);
+
+    /// <summary>
     /// 发送 UMP 数据。
     /// </summary>
     /// <param name="sessionId">会话ID。</param>
@@ -144,4 +179,14 @@ public interface INetworkMidi2Service : IDisposable
     /// 收到重传错误事件。
     /// </summary>
     event EventHandler<(string SessionId, int LostPackets)>? RetransmitErrorReceived;
+
+    /// <summary>
+    /// 收到认证要求事件。
+    /// </summary>
+    event EventHandler<(string SessionId, string CryptoNonce, bool RequireUserAuth)>? AuthenticationRequired;
+
+    /// <summary>
+    /// 认证结果事件。
+    /// </summary>
+    event EventHandler<(string SessionId, string DeviceName, bool Success)>? AuthenticationResult;
 }
