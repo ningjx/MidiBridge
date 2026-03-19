@@ -10,6 +10,8 @@ public static class NetworkMidi2Protocol
     public const int INVITATION_RETRY_COUNT = 3;
     public const int INVITATION_RETRY_INTERVAL_MS = 100;
     public const int PING_INTERVAL_MS = 10000;
+    public const int SESSION_CHECK_INTERVAL_MS = 1000;
+    public const int FEC_REDUNDANCY = 2;
 
     public enum SessionCommand : byte
     {
@@ -61,6 +63,11 @@ public static class NetworkMidi2Protocol
         public List<byte[]> RetransmitBuffer;
         public bool SupportsFEC;
         public bool SupportsRetransmit;
+        public int PacketsSent;
+        public int PacketsReceived;
+        public int PacketsLost;
+        public int PacketsOutOfOrder;
+        public int PacketsDuplicate;
     }
 
     public class DiscoveredDevice

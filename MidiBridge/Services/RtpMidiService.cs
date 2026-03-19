@@ -14,9 +14,14 @@ namespace MidiBridge.Services;
 /// </summary>
 public class RtpMidiService : IRtpMidiService
 {
+    private const int SYNC_INTERVAL_MS = 5000;
+    private const int DEVICE_TIMEOUT_MS = 15000;
+    private const int DEVICE_CHECK_INTERVAL_MS = 2000;
+
     private readonly ConcurrentDictionary<string, MidiDevice> _devices = new();
     private readonly ConcurrentDictionary<string, IPEndPoint> _deviceEndpoints = new();
-    
+    private readonly ConcurrentDictionary<string, DateTime> _deviceLastActivity = new();
+
     private UdpClient? _controlServer;
     private UdpClient? _dataServer;
     private CancellationTokenSource? _cts;
@@ -37,9 +42,6 @@ public class RtpMidiService : IRtpMidiService
     public event EventHandler<(MidiDevice Device, byte[] Data)>? MidiDataReceived;
     public event EventHandler<string>? StatusChanged;
 
-    /// <summary>
-    /// 启动 RTP-MIDI 服务。
-    /// </summary>
     public bool Start(int controlPort = 5004)
     {
         if (_isRunning) Stop();
@@ -56,6 +58,8 @@ public class RtpMidiService : IRtpMidiService
 
             Task.Run(() => ControlLoop(_cts.Token));
             Task.Run(() => DataLoop(_cts.Token));
+            Task.Run(() => SyncLoop(_cts.Token));
+            Task.Run(() => DeviceTimeoutCheckLoop(_cts.Token));
 
             OnStatusChanged($"RTP-MIDI 服务已启动: 端口 {controlPort}-{controlPort + 1}");
             return true;
@@ -68,9 +72,6 @@ public class RtpMidiService : IRtpMidiService
         }
     }
 
-    /// <summary>
-    /// 停止 RTP-MIDI 服务。
-    /// </summary>
     public void Stop()
     {
         if (!_isRunning) return;
@@ -85,13 +86,11 @@ public class RtpMidiService : IRtpMidiService
 
         _devices.Clear();
         _deviceEndpoints.Clear();
+        _deviceLastActivity.Clear();
 
         OnStatusChanged("RTP-MIDI 服务已停止");
     }
 
-    /// <summary>
-    /// 发送 MIDI 消息。
-    /// </summary>
     public void SendMessage(MidiDevice device, byte[] data)
     {
         if (!_deviceEndpoints.TryGetValue(device.Id, out var endpoint)) return;
@@ -101,7 +100,7 @@ public class RtpMidiService : IRtpMidiService
         {
             var packet = CreateMidiPacket(data);
             _dataServer.Send(packet, packet.Length, endpoint);
-            
+
             device.SentMessages++;
             device.LastActivity = DateTime.Now;
             device.PulseTransmit();
@@ -154,6 +153,73 @@ public class RtpMidiService : IRtpMidiService
         }
     }
 
+    private async void SyncLoop(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(SYNC_INTERVAL_MS, ct);
+
+                foreach (var device in _devices.Values.ToList())
+                {
+                    if (_deviceEndpoints.TryGetValue(device.Id, out var endpoint))
+                    {
+                        SendSyncPacket(endpoint);
+                    }
+                }
+            }
+            catch (OperationCanceledException) { break; }
+            catch (ObjectDisposedException) { break; }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "[RTP] 同步循环错误");
+            }
+        }
+    }
+
+    private async void DeviceTimeoutCheckLoop(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(DEVICE_CHECK_INTERVAL_MS, ct);
+
+                var now = DateTime.Now;
+                var timeoutDevices = new List<string>();
+
+                foreach (var kvp in _deviceLastActivity)
+                {
+                    var lastActivity = kvp.Value;
+                    var inactiveMs = (now - lastActivity).TotalMilliseconds;
+
+                    if (inactiveMs > DEVICE_TIMEOUT_MS)
+                    {
+                        timeoutDevices.Add(kvp.Key);
+                    }
+                }
+
+                foreach (var deviceId in timeoutDevices)
+                {
+                    if (_devices.TryRemove(deviceId, out var device))
+                    {
+                        _deviceEndpoints.TryRemove(deviceId, out _);
+                        _deviceLastActivity.TryRemove(deviceId, out _);
+                        DeviceRemoved?.Invoke(this, device);
+                        Log.Warning("[RTP] 设备超时断开: {Name}", device.Name);
+                    }
+                }
+            }
+            catch (OperationCanceledException) { break; }
+            catch (ObjectDisposedException) { break; }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "[RTP] 设备检查循环错误");
+            }
+        }
+    }
+
     private void ProcessControlPacket(byte[] data, IPEndPoint remoteEP)
     {
         if (data.Length < 4) return;
@@ -172,7 +238,7 @@ public class RtpMidiService : IRtpMidiService
                 HandleBye(remoteEP);
                 break;
             case "CK":
-                SendSyncResponse(data, remoteEP, isDataPort: false);
+                HandleSyncPacket(data, remoteEP, isDataPort: false);
                 break;
         }
     }
@@ -185,7 +251,7 @@ public class RtpMidiService : IRtpMidiService
 
         if (command == "CK")
         {
-            SendSyncResponse(data, remoteEP, isDataPort: true);
+            HandleSyncPacket(data, remoteEP, isDataPort: true);
         }
         else if (data.Length >= 13)
         {
@@ -220,6 +286,7 @@ public class RtpMidiService : IRtpMidiService
 
         _devices[deviceId] = device;
         _deviceEndpoints[deviceId] = new IPEndPoint(remoteEP.Address, remoteEP.Port + 1);
+        _deviceLastActivity[deviceId] = DateTime.Now;
 
         DeviceAdded?.Invoke(this, device);
         SendInvitationAccept(remoteEP);
@@ -231,10 +298,11 @@ public class RtpMidiService : IRtpMidiService
     {
         string host = remoteEP.Address.ToString();
         var device = _devices.Values.FirstOrDefault(d => d.Host == host);
-        
+
         if (device != null)
         {
             device.Status = MidiDeviceStatus.Connected;
+            _deviceLastActivity[device.Id] = DateTime.Now;
             DeviceUpdated?.Invoke(this, device);
         }
     }
@@ -243,13 +311,29 @@ public class RtpMidiService : IRtpMidiService
     {
         string host = remoteEP.Address.ToString();
         var device = _devices.Values.FirstOrDefault(d => d.Host == host);
-        
+
         if (device != null)
         {
             _devices.TryRemove(device.Id, out _);
             _deviceEndpoints.TryRemove(device.Id, out _);
+            _deviceLastActivity.TryRemove(device.Id, out _);
             DeviceRemoved?.Invoke(this, device);
         }
+    }
+
+    private void HandleSyncPacket(byte[] data, IPEndPoint remoteEP, bool isDataPort)
+    {
+        string host = remoteEP.Address.ToString();
+        var device = _devices.Values.FirstOrDefault(d => d.Host == host);
+
+        if (device != null)
+        {
+            _deviceLastActivity[device.Id] = DateTime.Now;
+            device.LastActivity = DateTime.Now;
+            DeviceUpdated?.Invoke(this, device);
+        }
+
+        SendSyncResponse(data, remoteEP, isDataPort);
     }
 
     private void ProcessMidiData(byte[] data, IPEndPoint remoteEP)
@@ -272,9 +356,34 @@ public class RtpMidiService : IRtpMidiService
             device.LastActivity = DateTime.Now;
             device.Status = MidiDeviceStatus.Active;
             device.PulseTransmit();
+            _deviceLastActivity[device.Id] = DateTime.Now;
             DeviceUpdated?.Invoke(this, device);
 
             MidiDataReceived?.Invoke(this, (device, midiData));
+        }
+    }
+
+    private void SendSyncPacket(IPEndPoint endpoint)
+    {
+        try
+        {
+            var packet = new byte[12];
+            packet[0] = 0xFF;
+            packet[1] = 0xFF;
+            packet[2] = (byte)'C';
+            packet[3] = (byte)'K';
+            WriteBigEndianUInt32(packet, 4, (uint)Random.Shared.Next());
+
+            var count = BitConverter.GetBytes(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            if (BitConverter.IsLittleEndian) Array.Reverse(count);
+            Buffer.BlockCopy(count, 0, packet, 8, 4);
+
+            _controlServer?.Send(packet, packet.Length, new IPEndPoint(endpoint.Address, endpoint.Port - 1));
+            Log.Debug("[RTP] 发送 CK 到 {Endpoint}", endpoint);
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "[RTP] 发送同步包失败");
         }
     }
 
@@ -338,18 +447,18 @@ public class RtpMidiService : IRtpMidiService
     private byte[] CreateMidiPacket(byte[] midiData)
     {
         var packet = new byte[13 + midiData.Length];
-        
+
         packet[0] = 0xFF;
         packet[1] = 0xFF;
         WriteBigEndianUInt32(packet, 2, (uint)Random.Shared.Next());
         WriteBigEndianUInt32(packet, 6, (uint)Random.Shared.Next());
-        
+
         packet[10] = 0;
         packet[11] = 0;
         packet[12] = (byte)(0xB0 | (midiData.Length & 0x0F));
-        
+
         Buffer.BlockCopy(midiData, 0, packet, 13, midiData.Length);
-        
+
         return packet;
     }
 

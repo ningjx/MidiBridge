@@ -26,7 +26,6 @@ public class NetworkMidi2Service : INetworkMidi2Service
     private string _productInstanceId;
 
     private readonly ConcurrentQueue<byte[]> _fecBuffer = new();
-    private const int FEC_BUFFER_SIZE = 2;
 
     public event EventHandler<MidiDevice>? DeviceAdded;
     public event EventHandler<MidiDevice>? DeviceRemoved;
@@ -52,8 +51,8 @@ public class NetworkMidi2Service : INetworkMidi2Service
     public void SetServiceInfo(string name, string productInstanceId = "")
     {
         _serviceName = name;
-        _productInstanceId = string.IsNullOrEmpty(productInstanceId) 
-            ? Guid.NewGuid().ToString("N").Substring(0, 16) 
+        _productInstanceId = string.IsNullOrEmpty(productInstanceId)
+            ? Guid.NewGuid().ToString("N").Substring(0, 16)
             : productInstanceId;
     }
 
@@ -70,6 +69,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
             Task.Run(() => ReceiveLoop(_cts.Token));
             Task.Run(() => PingLoop(_cts.Token));
+            Task.Run(() => SessionTimeoutCheckLoop(_cts.Token));
 
             OnStatusChanged($"Network MIDI 2.0 服务已启动: 端口 {port}");
             return true;
@@ -85,9 +85,9 @@ public class NetworkMidi2Service : INetworkMidi2Service
     public void Stop()
     {
         if (!_isRunning) return;
-        
+
         _isRunning = false;
-        
+
         try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
 
         foreach (var session in _sessions.Values.ToList())
@@ -239,6 +239,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
             {
                 session.LastActivity = DateTime.Now;
                 _sessions[sessionId] = session;
+                Log.Debug("[NM2] 收到 Pong: {SessionId}", sessionId);
             }
         }
     }
@@ -261,25 +262,20 @@ public class NetworkMidi2Service : INetworkMidi2Service
                 State = NetworkMidi2Protocol.SessionState.Connected,
                 LastActivity = DateTime.Now,
                 ReceiveSequence = sequenceNumber,
+                PreviousReceiveSequence = 0,
                 RetransmitBuffer = new List<byte[]>(),
+                PacketsReceived = 1,
             };
             _sessions[sessionId] = session;
             AddDevice(session);
         }
-
-        ushort expectedSeq = (ushort)(session.ReceiveSequence + 1);
-        if (sequenceNumber != expectedSeq && session.ReceiveSequence != 0)
+        else
         {
-            ushort diff = (ushort)(expectedSeq - sequenceNumber);
-            if (diff > 0 && diff < 100)
-            {
-                Log.Warning("[NM2] 数据包乱序或丢失: 期望 {ExpectedSeq}, 实际 {Seq}", expectedSeq, sequenceNumber);
-            }
+            CheckSequenceNumber(session, sequenceNumber);
+            session.LastActivity = DateTime.Now;
+            session.PacketsReceived++;
+            _sessions[sessionId] = session;
         }
-
-        session.ReceiveSequence = sequenceNumber;
-        session.LastActivity = DateTime.Now;
-        _sessions[sessionId] = session;
 
         ProcessUMPData(umpData, session);
 
@@ -289,6 +285,54 @@ public class NetworkMidi2Service : INetworkMidi2Service
             device.PulseTransmit();
             DeviceUpdated?.Invoke(this, device);
         }
+    }
+
+    private void CheckSequenceNumber(NetworkMidi2Protocol.SessionInfo session, ushort sequenceNumber)
+    {
+        if (session.ReceiveSequence == 0)
+        {
+            session.ReceiveSequence = sequenceNumber;
+            return;
+        }
+
+        ushort expectedSeq = (ushort)(session.ReceiveSequence + 1);
+
+        if (sequenceNumber == expectedSeq)
+        {
+            session.PreviousReceiveSequence = session.ReceiveSequence;
+            session.ReceiveSequence = sequenceNumber;
+        }
+        else if (sequenceNumber == session.ReceiveSequence)
+        {
+            session.PacketsDuplicate++;
+            Log.Debug("[NM2] 重复包: Seq={Seq}", sequenceNumber);
+        }
+        else if (IsSequenceNewer(sequenceNumber, session.ReceiveSequence))
+        {
+            int lost = CountPacketsLost(session.ReceiveSequence, sequenceNumber);
+            session.PacketsLost += lost;
+            session.PreviousReceiveSequence = session.ReceiveSequence;
+            session.ReceiveSequence = sequenceNumber;
+            Log.Warning("[NM2] 丢包检测: 期望 {Expected}, 收到 {Actual}, 丢失 {Lost} 包", expectedSeq, sequenceNumber, lost);
+        }
+        else
+        {
+            session.PacketsOutOfOrder++;
+            Log.Debug("[NM2] 乱序包: Seq={Seq}, 期望={Expected}", sequenceNumber, expectedSeq);
+        }
+    }
+
+    private static bool IsSequenceNewer(ushort received, ushort current)
+    {
+        int diff = received - current;
+        return diff > 0 && diff < 32768;
+    }
+
+    private static int CountPacketsLost(ushort lastSeq, ushort currentSeq)
+    {
+        int diff = currentSeq - lastSeq;
+        if (diff < 0) diff += 65536;
+        return Math.Max(0, diff - 1);
     }
 
     private void ProcessUMPData(byte[] umpData, NetworkMidi2Protocol.SessionInfo session)
@@ -417,23 +461,71 @@ public class NetworkMidi2Service : INetworkMidi2Service
         var ep = new IPEndPoint(IPAddress.Parse(session.RemoteHost), session.RemotePort);
 
         session.SendSequence++;
+        session.PacketsSent++;
         _sessions[sessionId] = session;
 
         var packet = NetworkMidi2Protocol.CreateUMPDataPacket(session.SendSequence, umpData);
 
-        if (_fecBuffer.Count >= FEC_BUFFER_SIZE)
+        UpdateRetransmitBuffer(session, packet);
+
+        SendPacketWithFEC(packet, ep, session);
+    }
+
+    private void UpdateRetransmitBuffer(NetworkMidi2Protocol.SessionInfo session, byte[] packet)
+    {
+        session.RetransmitBuffer ??= new List<byte[]>();
+        session.RetransmitBuffer.Add(packet);
+        
+        const int MAX_RETRANSMIT_BUFFER = 32;
+        while (session.RetransmitBuffer.Count > MAX_RETRANSMIT_BUFFER)
         {
-            _fecBuffer.TryDequeue(out _);
+            session.RetransmitBuffer.RemoveAt(0);
         }
-        _fecBuffer.Enqueue(packet);
+    }
 
-        SendPacket(packet, ep);
+    private void SendPacketWithFEC(byte[] primaryPacket, IPEndPoint endpoint, NetworkMidi2Protocol.SessionInfo session)
+    {
+        var packets = new List<byte[]>();
 
-        if (OutputDevices.FirstOrDefault(d => d.Id == sessionId) is { } device)
+        packets.Add(primaryPacket);
+
+        var previousPackets = session.RetransmitBuffer
+            .Skip(Math.Max(0, session.RetransmitBuffer.Count - NetworkMidi2Protocol.FEC_REDUNDANCY))
+            .ToList();
+
+        foreach (var prevPacket in previousPackets)
+        {
+            packets.Add(prevPacket);
+        }
+
+        if (packets.Count == 1)
+        {
+            SendPacket(primaryPacket, endpoint);
+        }
+        else
+        {
+            var combinedPacket = CombinePackets(packets);
+            SendPacket(combinedPacket, endpoint);
+        }
+
+        if (OutputDevices.FirstOrDefault(d => d.Id == session.Id) is { } device)
         {
             device.PulseTransmit();
             DeviceUpdated?.Invoke(this, device);
         }
+    }
+
+    private static byte[] CombinePackets(List<byte[]> packets)
+    {
+        int totalLength = packets.Sum(p => p.Length);
+        var combined = new byte[totalLength];
+        int offset = 0;
+        foreach (var packet in packets)
+        {
+            Buffer.BlockCopy(packet, 0, combined, offset, packet.Length);
+            offset += packet.Length;
+        }
+        return combined;
     }
 
     public void SendMidiData(string sessionId, byte[] midiData)
@@ -514,6 +606,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
                             var ep = new IPEndPoint(IPAddress.Parse(session.RemoteHost), session.RemotePort);
                             var pingPacket = NetworkMidi2Protocol.CreatePingPacket(_localSSRC, session.SenderSSRC);
                             SendPacket(pingPacket, ep);
+                            Log.Debug("[NM2] 发送 Ping: {Host}:{Port}", session.RemoteHost, session.RemotePort);
                         }
                         catch (Exception ex)
                         {
@@ -525,6 +618,50 @@ public class NetworkMidi2Service : INetworkMidi2Service
             catch (OperationCanceledException) { break; }
             catch (ObjectDisposedException) { break; }
             catch { break; }
+        }
+    }
+
+    private async void SessionTimeoutCheckLoop(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(NetworkMidi2Protocol.SESSION_CHECK_INTERVAL_MS, ct);
+
+                var now = DateTime.Now;
+                var timeoutSessions = new List<string>();
+
+                foreach (var kvp in _sessions)
+                {
+                    var session = kvp.Value;
+                    var inactiveMs = (now - session.LastActivity).TotalMilliseconds;
+
+                    if (inactiveMs > NetworkMidi2Protocol.SESSION_TIMEOUT_MS)
+                    {
+                        timeoutSessions.Add(kvp.Key);
+                    }
+                }
+
+                foreach (var sessionId in timeoutSessions)
+                {
+                    if (_sessions.TryRemove(sessionId, out var session))
+                    {
+                        string stableId = GetStableDeviceId(session.RemoteName, session.RemoteHost);
+                        RemoveDevice(stableId);
+
+                        var stats = $"Sent:{session.PacketsSent} Recv:{session.PacketsReceived} Lost:{session.PacketsLost} OOO:{session.PacketsOutOfOrder} Dup:{session.PacketsDuplicate}";
+                        Log.Warning("[NM2] 会话超时断开: {Name} [{Stats}]", session.RemoteName, stats);
+                        OnStatusChanged($"会话超时: {session.RemoteName}");
+                    }
+                }
+            }
+            catch (OperationCanceledException) { break; }
+            catch (ObjectDisposedException) { break; }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "[NM2] 会话检查循环错误");
+            }
         }
     }
 
