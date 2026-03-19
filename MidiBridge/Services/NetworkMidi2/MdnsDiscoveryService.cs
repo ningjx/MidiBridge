@@ -8,14 +8,10 @@ using Serilog;
 
 namespace MidiBridge.Services.NetworkMidi2;
 
-/// <summary>
-/// mDNS 发现服务实现，负责 Network MIDI 2.0 设备的发现。
-/// </summary>
 public class MdnsDiscoveryService : IMdnsDiscoveryService
 {
     private const string MDNS_MULTICAST_ADDRESS = "224.0.0.251";
     private const int MDNS_PORT = 5353;
-    private const int DNS_PORT = 5353;
 
     private UdpClient? _mdnsClient;
     private CancellationTokenSource? _cts;
@@ -23,6 +19,7 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
     private string _serviceName;
     private int _servicePort;
     private string _productInstanceId;
+    private string _umpEndpointName;
 
     public event EventHandler<NetworkMidi2Protocol.DiscoveredDevice>? DeviceDiscovered;
     public event EventHandler<NetworkMidi2Protocol.DiscoveredDevice>? DeviceLost;
@@ -37,7 +34,8 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
     {
         _serviceName = NetworkMidi2Protocol.DEFAULT_SERVICE_NAME;
         _servicePort = NetworkMidi2Protocol.DEFAULT_PORT;
-        _productInstanceId = "";
+        _productInstanceId = Guid.NewGuid().ToString("N").Substring(0, 16);
+        _umpEndpointName = NetworkMidi2Protocol.DEFAULT_SERVICE_NAME;
     }
 
     public void SetServiceInfo(string name, int port, string productInstanceId)
@@ -45,12 +43,9 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
         _serviceName = name;
         _servicePort = port;
         _productInstanceId = productInstanceId;
+        _umpEndpointName = name;
     }
 
-    /// <summary>
-    /// 启动发现服务。
-    /// </summary>
-    /// <returns>启动成功返回 true。</returns>
     public bool Start()
     {
         if (_isRunning) Stop();
@@ -73,7 +68,7 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
             Task.Run(() => QueryLoop(_cts.Token));
             Task.Run(() => CleanupLoop(_cts.Token));
 
-            Log.Information("[mDNS] 发现服务已启动");
+            Log.Information("[mDNS] 发现服务已启动: {ServiceType}", NetworkMidi2Protocol.MDNS_SERVICE_TYPE);
             return true;
         }
         catch (Exception ex)
@@ -82,18 +77,15 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
             return false;
         }
     }
-    
-    /// <summary>
-    /// 显式接口实现。
-    /// </summary>
+
     void IMdnsDiscoveryService.Start() => Start();
 
     public void Stop()
     {
         if (!_isRunning) return;
-        
+
         _isRunning = false;
-        
+
         try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
 
         try
@@ -144,7 +136,7 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
             catch (Exception ex)
             {
                 if (!ct.IsCancellationRequested)
-                    Log.Debug("[mDNS] 接收错误: {Message}", ex.Message);
+                    Log.Debug(ex, "[mDNS] 接收错误");
                 break;
             }
         }
@@ -162,7 +154,6 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
             bool isResponse = (flags & 0x8000) != 0;
             ushort questionCount = (ushort)((data[4] << 8) | data[5]);
             ushort answerCount = (ushort)((data[6] << 8) | data[7]);
-            ushort authorityCount = (ushort)((data[8] << 8) | data[9]);
             ushort additionalCount = (ushort)((data[10] << 8) | data[11]);
 
             offset = 12;
@@ -179,10 +170,16 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
                 offset = ParseResourceRecord(data, offset, remoteEP, isResponse);
                 if (offset < 0) return;
             }
+
+            for (int i = 0; i < additionalCount && offset < data.Length; i++)
+            {
+                offset = ParseResourceRecord(data, offset, remoteEP, isResponse);
+                if (offset < 0) return;
+            }
         }
         catch (Exception ex)
         {
-            Log.Debug("[mDNS] 处理数据包错误: {Message}", ex.Message);
+            Log.Debug(ex, "[mDNS] 处理数据包错误");
         }
     }
 
@@ -201,17 +198,19 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
 
         if (offset + recordLength > data.Length) return -1;
 
-        if (recordType == 33 && name.Contains("_midi2._udp"))
+        string serviceType = NetworkMidi2Protocol.MDNS_SERVICE_TYPE;
+
+        if (recordType == 33 && name.Contains(serviceType.Replace(".local", "")))
         {
             ParseServiceRecord(data, offset, recordLength, remoteEP, name, ttl);
-        }
-        else if (recordType == 1)
-        {
-            ParseARecord(data, offset, recordLength, remoteEP, name);
         }
         else if (recordType == 16)
         {
             ParseTXTRecord(data, offset, recordLength, remoteEP, name);
+        }
+        else if (recordType == 1)
+        {
+            ParseARecord(data, offset, recordLength, remoteEP, name);
         }
 
         return offset + recordLength;
@@ -226,22 +225,23 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
         ushort port = (ushort)((data[offset + 4] << 8) | data[offset + 5]);
 
         int nameOffset = offset + 6;
-        string instanceName = ReadName(data, ref nameOffset);
+        string targetHost = ReadName(data, ref nameOffset);
 
-        if (string.IsNullOrEmpty(instanceName)) return;
+        if (string.IsNullOrEmpty(targetHost)) return;
 
-        // 过滤掉本机自己
         if (IsLocalAddress(remoteEP.Address) && port == _servicePort)
         {
-            Log.Debug("[mDNS] 忽略本机: {InstanceName}", instanceName);
+            Log.Debug("[mDNS] 忽略本机: {TargetHost}:{Port}", targetHost, port);
             return;
         }
 
-        string deviceKey = $"{instanceName}@{remoteEP.Address}";
+        string serviceInstanceName = ExtractServiceInstanceName(name);
+        string deviceKey = $"{serviceInstanceName}@{remoteEP.Address}";
 
         var device = new NetworkMidi2Protocol.DiscoveredDevice
         {
-            Name = instanceName,
+            ServiceInstanceName = serviceInstanceName,
+            UMPEndpointName = serviceInstanceName,
             Host = remoteEP.Address.ToString(),
             Port = port,
             ProductInstanceId = "",
@@ -253,11 +253,80 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
             _discoveredDevices[deviceKey] = device;
             _deviceLastSeen[deviceKey] = DateTime.Now;
             DeviceDiscovered?.Invoke(this, device);
-            Log.Information("[mDNS] 发现设备: {InstanceName} 地址 {Address}:{Port}", instanceName, remoteEP.Address, port);
+            Log.Information("[mDNS] 发现设备: {Name} 地址 {Address}:{Port}", serviceInstanceName, remoteEP.Address, port);
         }
         else
         {
             _deviceLastSeen[deviceKey] = DateTime.Now;
+        }
+    }
+
+    private string ExtractServiceInstanceName(string fullName)
+    {
+        if (string.IsNullOrEmpty(fullName)) return "";
+
+        int idx = fullName.IndexOf("._midi2");
+        if (idx > 0)
+        {
+            return fullName.Substring(0, idx);
+        }
+
+        return fullName.Split('.')[0];
+    }
+
+    private void ParseTXTRecord(byte[] data, int offset, int length, IPEndPoint remoteEP, string name)
+    {
+        int end = offset + length;
+        string umpEndpointName = "";
+        string productInstanceId = "";
+
+        while (offset < end)
+        {
+            byte txtLen = data[offset++];
+            if (offset + txtLen > end) break;
+
+            string txt = Encoding.UTF8.GetString(data, offset, txtLen);
+            offset += txtLen;
+
+            if (txt.StartsWith("UMPEndpointName="))
+            {
+                umpEndpointName = txt.Substring(16);
+            }
+            else if (txt.StartsWith("ProductInstanceId="))
+            {
+                productInstanceId = txt.Substring(17);
+            }
+        }
+
+        if (!string.IsNullOrEmpty(umpEndpointName) || !string.IsNullOrEmpty(productInstanceId))
+        {
+            Log.Debug("[mDNS] TXT: UMPEndpointName={Name}, ProductInstanceId={Id}", umpEndpointName, productInstanceId);
+
+            foreach (var device in _discoveredDevices.Values)
+            {
+                if (device.Host == remoteEP.Address.ToString())
+                {
+                    if (!string.IsNullOrEmpty(umpEndpointName))
+                        device.UMPEndpointName = umpEndpointName;
+                    if (!string.IsNullOrEmpty(productInstanceId))
+                        device.ProductInstanceId = productInstanceId;
+                }
+            }
+        }
+    }
+
+    private void ParseARecord(byte[] data, int offset, int length, IPEndPoint remoteEP, string name)
+    {
+        if (length != 4) return;
+
+        try
+        {
+            var ip = new IPAddress(data, offset);
+            Log.Debug("[mDNS] A记录: {Name} -> {IP}", name, ip);
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "[mDNS] A记录解析错误");
         }
     }
 
@@ -282,45 +351,10 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
         return false;
     }
 
-    private void ParseARecord(byte[] data, int offset, int length, IPEndPoint remoteEP, string name)
-    {
-        if (length != 4) return;
-
-        try
-        {
-            var ip = new IPAddress(data, offset);
-            Log.Debug("[mDNS] A记录: {Name} -> {IP}", name, ip);
-        }
-        catch (Exception ex)
-        {
-            Log.Debug("[mDNS] A记录解析错误: {Message}", ex.Message);
-        }
-    }
-
-    private void ParseTXTRecord(byte[] data, int offset, int length, IPEndPoint remoteEP, string name)
-    {
-        int end = offset + length;
-        while (offset < end)
-        {
-            byte txtLen = data[offset++];
-            if (offset + txtLen > end) break;
-
-            string txt = Encoding.UTF8.GetString(data, offset, txtLen);
-            offset += txtLen;
-
-            if (txt.StartsWith("productInstanceId="))
-            {
-                string productId = txt.Substring(17);
-                Log.Debug("[mDNS] TXT: productInstanceId={ProductId}", productId);
-            }
-        }
-    }
-
     private string ReadName(byte[] data, ref int offset)
     {
         var sb = new StringBuilder();
         int originalOffset = offset;
-        bool jumped = false;
 
         while (offset < data.Length)
         {
@@ -332,9 +366,7 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
             {
                 if (offset >= data.Length) break;
                 int pointer = ((len & 0x3F) << 8) | data[offset++];
-                if (!jumped) originalOffset = offset;
                 offset = pointer;
-                jumped = true;
                 continue;
             }
 
@@ -345,7 +377,6 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
             offset += len;
         }
 
-        if (!jumped) originalOffset = offset;
         return sb.ToString();
     }
 
@@ -384,7 +415,7 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
         writer.Write((byte)0x00);
 
         writer.Write((byte)0x00);
-        writer.Write((byte)0x02);
+        writer.Write((byte)0x01);
 
         writer.Write((byte)0x00);
         writer.Write((byte)0x00);
@@ -402,31 +433,21 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
         writer.Write((byte)0x00);
         writer.Write((byte)0x01);
 
-        WriteNameToWriter(writer, serviceType);
-
-        writer.Write((byte)0x00);
-        writer.Write((byte)0x10);
-        writer.Write((byte)0x00);
-        writer.Write((byte)0x01);
-
         return ms.ToArray();
     }
 
     private byte[] CreateAnnouncement()
     {
-        var serviceName = $"{_serviceName}.{NetworkMidi2Protocol.MDNS_SERVICE_TYPE}";
-        
+        var serviceInstanceName = $"{_productInstanceId.Substring(0, 8)}-{_serviceName}";
+        var fullServiceName = $"{serviceInstanceName}.{NetworkMidi2Protocol.MDNS_SERVICE_TYPE}";
+
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms);
 
-        ushort transactionId = 0;
-        writer.Write((byte)((transactionId >> 8) & 0xFF));
-        writer.Write((byte)(transactionId & 0xFF));
+        writer.Write((byte)0x00);
+        writer.Write((byte)0x00);
 
         writer.Write((byte)0x84);
-        writer.Write((byte)0x00);
-
-        writer.Write((byte)0x00);
         writer.Write((byte)0x00);
 
         writer.Write((byte)0x00);
@@ -438,13 +459,9 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
         writer.Write((byte)0x00);
         writer.Write((byte)0x00);
 
-        var nameBytes = Encoding.UTF8.GetBytes(serviceName);
         uint ttl = 4500;
-        ushort srvLen = (ushort)(2 + 2 + 2 + 1 + nameBytes.Length + 1);
-        string txtEntry = $"productInstanceId={_productInstanceId}";
-        var txtBytes = Encoding.UTF8.GetBytes(txtEntry);
 
-        WriteNameToWriter(writer, serviceName);
+        WriteNameToWriter(writer, fullServiceName);
         writer.Write((byte)0x00);
         writer.Write((byte)0x21);
         writer.Write((byte)0x00);
@@ -453,17 +470,48 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
         writer.Write((byte)((ttl >> 16) & 0xFF));
         writer.Write((byte)((ttl >> 8) & 0xFF));
         writer.Write((byte)(ttl & 0xFF));
+
+        var targetBytes = Encoding.UTF8.GetBytes($"{Environment.MachineName.ToLower()}.local.");
+        ushort srvLen = (ushort)(2 + 2 + 2 + targetBytes.Length);
         writer.Write((byte)((srvLen >> 8) & 0xFF));
         writer.Write((byte)(srvLen & 0xFF));
+
         writer.Write((byte)0x00);
         writer.Write((byte)0x00);
-        writer.Write((byte)0x00);
-        writer.Write((byte)0x00);
+
         writer.Write((byte)((_servicePort >> 8) & 0xFF));
         writer.Write((byte)(_servicePort & 0xFF));
-        WriteNameToWriter(writer, serviceName);
 
-        WriteNameToWriter(writer, serviceName);
+        WriteNameToWriter(writer, $"{Environment.MachineName.ToLower()}.local.");
+
+        WriteNameToWriter(writer, fullServiceName);
+        writer.Write((byte)0x00);
+        writer.Write((byte)0x10);
+        writer.Write((byte)0x00);
+        writer.Write((byte)0x01);
+        writer.Write((byte)((ttl >> 24) & 0xFF));
+        writer.Write((byte)((ttl >> 16) & 0xFF));
+        writer.Write((byte)((ttl >> 8) & 0xFF));
+        writer.Write((byte)(ttl & 0xFF));
+
+        var txtEntries = new List<string>
+        {
+            $"UMPEndpointName={_umpEndpointName}",
+            $"ProductInstanceId={_productInstanceId}"
+        };
+
+        int txtLen = txtEntries.Sum(e => 1 + Encoding.UTF8.GetByteCount(e));
+        writer.Write((byte)((txtLen >> 8) & 0xFF));
+        writer.Write((byte)(txtLen & 0xFF));
+
+        foreach (var entry in txtEntries)
+        {
+            var entryBytes = Encoding.UTF8.GetBytes(entry);
+            writer.Write((byte)entryBytes.Length);
+            writer.Write(entryBytes);
+        }
+
+        WriteNameToWriter(writer, $"{Environment.MachineName.ToLower()}.local.");
         writer.Write((byte)0x00);
         writer.Write((byte)0x01);
         writer.Write((byte)0x00);
@@ -482,21 +530,6 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
         writer.Write(ipBytes[2]);
         writer.Write(ipBytes[3]);
 
-        WriteNameToWriter(writer, serviceName);
-        writer.Write((byte)0x00);
-        writer.Write((byte)0x10);
-        writer.Write((byte)0x00);
-        writer.Write((byte)0x01);
-        writer.Write((byte)((ttl >> 24) & 0xFF));
-        writer.Write((byte)((ttl >> 16) & 0xFF));
-        writer.Write((byte)((ttl >> 8) & 0xFF));
-        writer.Write((byte)(ttl & 0xFF));
-        ushort txtLen = (ushort)(1 + txtBytes.Length);
-        writer.Write((byte)((txtLen >> 8) & 0xFF));
-        writer.Write((byte)(txtLen & 0xFF));
-        writer.Write((byte)txtEntry.Length);
-        writer.Write(txtBytes);
-
         return ms.ToArray();
     }
 
@@ -505,6 +538,7 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
         var parts = name.Split('.');
         foreach (var part in parts)
         {
+            if (string.IsNullOrEmpty(part)) continue;
             var partBytes = Encoding.UTF8.GetBytes(part);
             writer.Write((byte)partBytes.Length);
             writer.Write(partBytes);
@@ -572,14 +606,14 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
                     {
                         _deviceLastSeen.TryRemove(key, out _);
                         DeviceLost?.Invoke(this, device);
-                        Log.Information("[mDNS] 设备离线: {DeviceName}", device.Name);
+                        Log.Information("[mDNS] 设备离线: {DeviceName}", device.UMPEndpointName);
                     }
                 }
             }
             catch (OperationCanceledException) { break; }
             catch (ObjectDisposedException) { break; }
             catch { break; }
-        }
+            }
     }
 
     private IPAddress GetLocalIPAddress()
