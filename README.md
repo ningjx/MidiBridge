@@ -4,7 +4,7 @@
 
 ## 主界面
 
-![MidiBridge 主界面](doc/Snipaste_2026-03-17_23-18-49.png)
+![MidiBridge 主界面](docs/Snipaste_2026-03-17_23-18-49.png)
 
 ## 功能特性
 
