@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
+using MidiBridge.Services.NetworkMidi2;
 using NAudio.Midi;
 using Test;
 
@@ -1200,9 +1201,9 @@ public class NM2DiscoverableServer : IDisposable
     private readonly string _serviceName;
     private readonly int _port;
     private readonly string _productId;
-    private readonly byte _localSSRC;
+    private readonly uint _localSSRC;
     
-    private byte _remoteSSRC;
+    private uint _remoteSSRC;
     private IPEndPoint? _remoteEP;
     private ushort _sendSequence;
     
@@ -1217,7 +1218,7 @@ public class NM2DiscoverableServer : IDisposable
         _serviceName = serviceName;
         _port = port;
         _productId = productId;
-        _localSSRC = (byte)Random.Shared.Next(1, 255);
+        _localSSRC = (uint)Random.Shared.Next(1, int.MaxValue);
     }
     
     public bool Start()
@@ -1239,7 +1240,7 @@ public class NM2DiscoverableServer : IDisposable
             Task.Run(() => AnnounceLoop(_cts.Token));
             
             OnLog?.Invoke($"[服务端] 已启动，端口 {_port}");
-            OnLog?.Invoke($"[服务端] SSRC: {_localSSRC:X2}");
+            OnLog?.Invoke($"[服务端] SSRC: 0x{_localSSRC:X8}");
             return true;
         }
         catch (Exception ex)
@@ -1251,11 +1252,12 @@ public class NM2DiscoverableServer : IDisposable
     
     public void Stop()
     {
-        if (_remoteEP != null && _dataServer != null && _remoteSSRC != 0)
+        if (_remoteEP != null && _dataServer != null)
         {
-            var endPacket = new byte[] { 0x02, 0x00, _localSSRC, _remoteSSRC };
-            _dataServer.Send(endPacket, endPacket.Length, _remoteEP);
-            OnLog?.Invoke("[服务端] 发送 END");
+            var byeCmd = NetworkMidi2Protocol.CreateByeCommand(NetworkMidi2Protocol.ByeReason.UserTerminated);
+            var packet = NetworkMidi2Protocol.CreateUDPPacket(byeCmd);
+            _dataServer.Send(packet, packet.Length, _remoteEP);
+            OnLog?.Invoke("[服务端] 发送 BYE");
         }
         
         _cts?.Cancel();
@@ -1318,7 +1320,6 @@ public class NM2DiscoverableServer : IDisposable
             if (offset + 4 > data.Length) return;
             
             ushort qtype = (ushort)((data[offset] << 8) | data[offset + 1]);
-            ushort qclass = (ushort)((data[offset + 2] << 8) | data[offset + 3]);
             offset += 4;
             
             if (name.Contains("_midi2._udp") && qtype == 33)
@@ -1353,9 +1354,7 @@ public class NM2DiscoverableServer : IDisposable
         writer.Write((byte)0x00);
         writer.Write((byte)0x00);
         
-        var nameBytes = Encoding.UTF8.GetBytes(serviceName);
-        ushort srvLen = (ushort)(2 + 2 + 2 + 1 + nameBytes.Length + 1);
-        
+        ushort srvLen = 7;
         WriteMdnsName(writer, serviceName);
         writer.Write((byte)0x00);
         writer.Write((byte)0x21);
@@ -1373,7 +1372,7 @@ public class NM2DiscoverableServer : IDisposable
         writer.Write((byte)0x00);
         writer.Write((byte)((_port >> 8) & 0xFF));
         writer.Write((byte)(_port & 0xFF));
-        WriteMdnsName(writer, serviceName);
+        writer.Write((byte)0x00);
         
         WriteMdnsName(writer, serviceName);
         writer.Write((byte)0x00);
@@ -1449,9 +1448,7 @@ public class NM2DiscoverableServer : IDisposable
         writer.Write((byte)0x00);
         writer.Write((byte)0x00);
         
-        var nameBytes = Encoding.UTF8.GetBytes(serviceName);
-        ushort srvLen = (ushort)(2 + 2 + 2 + 1 + nameBytes.Length + 1);
-        
+        ushort srvLen = 7;
         WriteMdnsName(writer, serviceName);
         writer.Write((byte)0x00);
         writer.Write((byte)0x21);
@@ -1469,7 +1466,7 @@ public class NM2DiscoverableServer : IDisposable
         writer.Write((byte)0x00);
         writer.Write((byte)((_port >> 8) & 0xFF));
         writer.Write((byte)(_port & 0xFF));
-        WriteMdnsName(writer, serviceName);
+        writer.Write((byte)0x00);
         
         WriteMdnsName(writer, serviceName);
         writer.Write((byte)0x00);
@@ -1536,94 +1533,179 @@ public class NM2DiscoverableServer : IDisposable
     
     private void ProcessDataPacket(byte[] data, IPEndPoint remoteEP)
     {
-        if (data.Length < 4) return;
-        
-        byte cmdByte = data[0];
-        byte cmd = (byte)(cmdByte & 0x0F);
-        byte status = data[1];
-        byte ssrc = data[2];
-        byte remoteSSRC = data[3];
-        
-        if (cmdByte == 0x10)
+        if (!NetworkMidi2Protocol.ParseUDPPacket(data, out var commandPackets))
         {
-            ProcessUMPData(data);
+            OnLog?.Invoke($"[服务端] 无效的数据包签名");
             return;
         }
         
-        switch (cmd)
+        foreach (var cmdPacket in commandPackets)
         {
-            case 0x01:
-                if (status == 0x00)
-                {
-                    ProcessInvitation(data, remoteEP, ssrc);
-                }
-                else if (status == 0x01)
-                {
-                    OnLog?.Invoke($"[服务端] 收到 INV ACCEPT (连接已建立)");
-                }
+            ProcessCommandPacket(cmdPacket, remoteEP);
+        }
+    }
+    
+    private void ProcessCommandPacket(byte[] cmdPacket, IPEndPoint remoteEP)
+    {
+        if (!NetworkMidi2Protocol.ParseCommandPacket(cmdPacket, out var cmdCode, out var payloadLen, out var cmdSpecific1, out var cmdSpecific2, out var payload))
+        {
+            return;
+        }
+        
+        switch (cmdCode)
+        {
+            case NetworkMidi2Protocol.CommandCode.Invitation:
+                ProcessInvitation(payload, cmdSpecific1, remoteEP);
                 break;
                 
-            case 0x02:
-                OnLog?.Invoke($"[服务端] 收到 END，断开连接");
-                _remoteEP = null;
-                _remoteSSRC = 0;
+            case NetworkMidi2Protocol.CommandCode.InvitationWithAuth:
+                ProcessInvitationWithAuth(payload, remoteEP);
                 break;
                 
-            case 0x03:
-                if (status == 0x00)
-                {
-                    var pong = new byte[] { 0x03, 0x01, _localSSRC, ssrc };
-                    _dataServer?.Send(pong, pong.Length, remoteEP);
-                    OnLog?.Invoke($"[服务端] PING -> PONG");
-                }
+            case NetworkMidi2Protocol.CommandCode.InvitationWithUserAuth:
+                ProcessInvitationWithUserAuth(payload, remoteEP);
+                break;
+                
+            case NetworkMidi2Protocol.CommandCode.Ping:
+                ProcessPing(payload, remoteEP);
+                break;
+                
+            case NetworkMidi2Protocol.CommandCode.Bye:
+                ProcessBye(payload, remoteEP);
+                break;
+                
+            case NetworkMidi2Protocol.CommandCode.SessionReset:
+                ProcessSessionReset(remoteEP);
+                break;
+                
+            case NetworkMidi2Protocol.CommandCode.RetransmitRequest:
+                ProcessRetransmitRequest(payload);
+                break;
+                
+            case NetworkMidi2Protocol.CommandCode.UMPData:
+                NetworkMidi2Protocol.ParseUMPDataCommand(cmdSpecific1, cmdSpecific2, payload, out var seq, out var umpData);
+                ProcessUMPData(seq, umpData);
+                break;
+                
+            default:
+                OnLog?.Invoke($"[服务端] 未知命令: 0x{((byte)cmdCode):X2}");
                 break;
         }
     }
     
-    private void ProcessInvitation(byte[] data, IPEndPoint remoteEP, byte ssrc)
+    private void ProcessInvitation(byte[] payload, byte nameWords, IPEndPoint remoteEP)
     {
-        _remoteSSRC = ssrc;
+        if (!NetworkMidi2Protocol.ParseInvitationCommand(payload, nameWords, out var umpEndpointName, out var productInstanceId, out var capabilities))
+        {
+            SendNAK(NetworkMidi2Protocol.NAKReason.CommandMalformed, new byte[4], remoteEP);
+            return;
+        }
+        
         _remoteEP = remoteEP;
+        _remoteSSRC = (uint)Random.Shared.Next(1, int.MaxValue);
         
-        string name = "";
-        if (data.Length > 6)
-        {
-            int offset = 4;
-            int nameLength = (data[offset] << 8) | data[offset + 1];
-            offset += 2;
-            if (offset + nameLength <= data.Length)
-            {
-                name = Encoding.UTF8.GetString(data, offset, nameLength);
-            }
-        }
+        var replyCmd = NetworkMidi2Protocol.CreateInvitationReplyAccepted(_serviceName, _productId);
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(replyCmd);
+        _dataServer?.Send(packet, packet.Length, remoteEP);
         
-        var reply = new byte[] { 0x01, 0x01, _localSSRC, ssrc };
-        _dataServer?.Send(reply, reply.Length, remoteEP);
-        
-        OnLog?.Invoke($"[服务端] INV from {remoteEP} (name: {name})");
-        OnLog?.Invoke($"[服务端] 已接受连接! SSRC: {_localSSRC:X2} <-> {ssrc:X2}");
+        OnLog?.Invoke($"[服务端] INV from {remoteEP} (name: {umpEndpointName}, product: {productInstanceId})");
+        OnLog?.Invoke($"[服务端] 已接受连接! SSRC: 0x{_localSSRC:X8}");
     }
     
-    private void ProcessUMPData(byte[] data)
+    private void ProcessInvitationWithAuth(byte[] payload, IPEndPoint remoteEP)
     {
-        if (data.Length < 5) return;
+        if (!NetworkMidi2Protocol.ParseInvitationWithAuth(payload, out var authDigest))
+        {
+            SendNAK(NetworkMidi2Protocol.NAKReason.CommandMalformed, new byte[4], remoteEP);
+            return;
+        }
         
-        ushort seq = (ushort)((data[1] << 8) | data[2]);
-        byte[] umpData = new byte[data.Length - 4];
-        Buffer.BlockCopy(data, 4, umpData, 0, umpData.Length);
+        OnLog?.Invoke($"[服务端] INV_WITH_AUTH from {remoteEP}");
         
-        OnLog?.Invoke($"[服务端] UMP seq={seq}, {umpData.Length} bytes");
+        _remoteEP = remoteEP;
+        _remoteSSRC = (uint)Random.Shared.Next(1, int.MaxValue);
+        
+        var replyCmd = NetworkMidi2Protocol.CreateInvitationReplyAccepted(_serviceName, _productId);
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(replyCmd);
+        _dataServer?.Send(packet, packet.Length, remoteEP);
+        
+        OnLog?.Invoke($"[服务端] 已接受认证连接!");
+    }
+    
+    private void ProcessInvitationWithUserAuth(byte[] payload, IPEndPoint remoteEP)
+    {
+        if (!NetworkMidi2Protocol.ParseInvitationWithUserAuth(payload, out var authDigest, out var username))
+        {
+            SendNAK(NetworkMidi2Protocol.NAKReason.CommandMalformed, new byte[4], remoteEP);
+            return;
+        }
+        
+        OnLog?.Invoke($"[服务端] INV_WITH_USER_AUTH from {remoteEP}, user: {username}");
+        
+        _remoteEP = remoteEP;
+        _remoteSSRC = (uint)Random.Shared.Next(1, int.MaxValue);
+        
+        var replyCmd = NetworkMidi2Protocol.CreateInvitationReplyAccepted(_serviceName, _productId);
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(replyCmd);
+        _dataServer?.Send(packet, packet.Length, remoteEP);
+        
+        OnLog?.Invoke($"[服务端] 已接受用户认证连接!");
+    }
+    
+    private void ProcessPing(byte[] payload, IPEndPoint remoteEP)
+    {
+        if (!NetworkMidi2Protocol.ParsePingCommand(payload, out var pingId)) return;
+        
+        var replyCmd = NetworkMidi2Protocol.CreatePingReplyCommand(pingId);
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(replyCmd);
+        _dataServer?.Send(packet, packet.Length, remoteEP);
+        
+        OnLog?.Invoke($"[服务端] PING id={pingId} -> PONG");
+    }
+    
+    private void ProcessBye(byte[] payload, IPEndPoint remoteEP)
+    {
+        NetworkMidi2Protocol.ParseByeCommand(payload, out var reason, out var textMessage);
+        
+        var replyCmd = NetworkMidi2Protocol.CreateByeReplyCommand();
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(replyCmd);
+        _dataServer?.Send(packet, packet.Length, remoteEP);
+        
+        OnLog?.Invoke($"[服务端] 收到 BYE，原因: {reason}");
+        
+        _remoteEP = null;
+        _remoteSSRC = 0;
+    }
+    
+    private void ProcessSessionReset(IPEndPoint remoteEP)
+    {
+        var replyCmd = NetworkMidi2Protocol.CreateSessionResetReplyCommand();
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(replyCmd);
+        _dataServer?.Send(packet, packet.Length, remoteEP);
+        
+        _sendSequence = 0;
+        OnLog?.Invoke("[服务端] 收到 SESSION_RESET，已重置序列号");
+    }
+    
+    private void ProcessRetransmitRequest(byte[] payload)
+    {
+        NetworkMidi2Protocol.ParseRetransmitRequest(payload, out var seqNum, out var numCommands);
+        OnLog?.Invoke($"[服务端] RETRANSMIT_REQUEST seq={seqNum}, count={numCommands}");
+        
+        var errorCmd = NetworkMidi2Protocol.CreateRetransmitErrorCommand(NetworkMidi2Protocol.RetransmitErrorReason.BufferDoesNotContainSequence, seqNum);
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(errorCmd);
+        _dataServer?.Send(packet, packet.Length, _remoteEP);
+    }
+    
+    private void ProcessUMPData(ushort sequenceNumber, byte[] umpData)
+    {
+        OnLog?.Invoke($"[服务端] UMP seq={sequenceNumber}, {umpData.Length} bytes");
         
         int offset = 0;
         while (offset + 4 <= umpData.Length)
         {
             int mt = (umpData[offset] >> 4) & 0x0F;
-            int packetSize = mt switch
-            {
-                0x2 => 4,
-                0x4 => 8,
-                _ => 4
-            };
+            int packetSize = NetworkMidi2Protocol.GetUMPPacketSize(mt);
             
             if (offset + packetSize > umpData.Length) break;
             
@@ -1647,6 +1729,14 @@ public class NM2DiscoverableServer : IDisposable
             
             offset += packetSize;
         }
+    }
+    
+    private void SendNAK(NetworkMidi2Protocol.NAKReason reason, byte[] originalHeader, IPEndPoint remoteEP)
+    {
+        var nakCmd = NetworkMidi2Protocol.CreateNAKCommand(reason, originalHeader);
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(nakCmd);
+        _dataServer?.Send(packet, packet.Length, remoteEP);
+        OnLog?.Invoke($"[服务端] 发送 NAK, 原因: {reason}");
     }
     
     public void SendNoteOn(byte note, byte velocity, byte channel = 0)
@@ -1698,23 +1788,19 @@ public class NM2DiscoverableServer : IDisposable
             return;
         }
         
-        var ping = new byte[] { 0x03, 0x00, _localSSRC, _remoteSSRC };
-        _dataServer.Send(ping, ping.Length, _remoteEP);
-        OnLog?.Invoke("[服务端] 发送 PING");
+        var pingId = (uint)Random.Shared.Next();
+        var pingCmd = NetworkMidi2Protocol.CreatePingCommand(pingId);
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(pingCmd);
+        _dataServer.Send(packet, packet.Length, _remoteEP);
+        OnLog?.Invoke($"[服务端] 发送 PING id={pingId}");
     }
     
     private void SendUMPData(byte[] umpData)
     {
         if (_remoteEP == null || _dataServer == null) return;
         
-        var packet = new byte[4 + umpData.Length];
-        packet[0] = 0x10;
-        packet[1] = (byte)((_sendSequence >> 8) & 0xFF);
-        packet[2] = (byte)(_sendSequence & 0xFF);
-        packet[3] = 0;
-        Buffer.BlockCopy(umpData, 0, packet, 4, umpData.Length);
-        
-        _sendSequence++;
+        var umpCmd = NetworkMidi2Protocol.CreateUMPDataCommand(_sendSequence++, umpData);
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(umpCmd);
         _dataServer.Send(packet, packet.Length, _remoteEP);
     }
     
@@ -1731,7 +1817,7 @@ public class NM2DiscoverableServer : IDisposable
         return IPAddress.Loopback;
     }
     
-    public void Dispose()
+public void Dispose()
     {
         Stop();
         try { _mdnsClient?.DropMulticastGroup(IPAddress.Parse(MDNS_MULTICAST_ADDRESS)); } catch { }

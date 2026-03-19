@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using MidiBridge.Services.NetworkMidi2;
 
 namespace Test;
 
@@ -9,12 +10,13 @@ public class NetworkMidi2Server : IDisposable
     private UdpClient? _dataServer;
     private UdpClient? _mdnsClient;
     private CancellationTokenSource? _cts;
-    private bool _isRunning;
-    private byte _localSSRC;
-    private byte _remoteSSRC;
+    private uint _localSSRC;
+    private uint _remoteSSRC;
     private IPEndPoint? _remoteEP;
     private string _serviceName;
     private int _port;
+    private string _productId;
+    private ushort _sendSequence;
     
     public event Action<string>? OnLog;
     public event Action<byte[]>? OnMidiReceived;
@@ -23,11 +25,12 @@ public class NetworkMidi2Server : IDisposable
     public string ServiceName => _serviceName;
     public int Port => _port;
     
-    public NetworkMidi2Server(string serviceName = "TestNM2Device", int port = 5507)
+    public NetworkMidi2Server(string serviceName = "TestNM2Device", int port = 5507, string productId = "TestProduct")
     {
         _serviceName = serviceName;
         _port = port;
-        _localSSRC = (byte)Random.Shared.Next(1, 255);
+        _productId = productId;
+        _localSSRC = (uint)Random.Shared.Next(1, int.MaxValue);
     }
     
     public bool Start()
@@ -41,13 +44,13 @@ public class NetworkMidi2Server : IDisposable
             _mdnsClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             
             _cts = new CancellationTokenSource();
-            _isRunning = true;
             
             Task.Run(() => ReceiveLoop(_cts.Token));
             Task.Run(() => MDNSAnnounceLoop(_cts.Token));
             
             Log($"[NM2 Server] Started on port {_port}");
             Log($"[NM2 Server] Service name: {_serviceName}");
+            Log($"[NM2 Server] Local SSRC: 0x{_localSSRC:X8}");
             return true;
         }
         catch (Exception ex)
@@ -81,45 +84,75 @@ public class NetworkMidi2Server : IDisposable
     private byte[] CreateMDNSAnnouncement()
     {
         var serviceName = _serviceName + "._midi2._udp.local";
-        var serviceType = "_midi2._udp.local";
-        var localDomain = "local";
+        var txtEntry = $"productInstanceId={_productId}";
+        var txtBytes = Encoding.UTF8.GetBytes(txtEntry);
+        var localIP = GetLocalIPAddress();
+        var ipBytes = localIP.GetAddressBytes();
+        uint ttl = 4500;
         
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms);
         
-        // Header
         writer.Write((byte)0x00);
         writer.Write((byte)0x00);
-        writer.Write((byte)0x84); // Flags: response, authoritative
+        writer.Write((byte)0x84);
         writer.Write((byte)0x00);
         writer.Write((byte)0x00);
-        writer.Write((byte)0x00); // Questions: 0
         writer.Write((byte)0x00);
-        writer.Write((byte)0x01); // Answers: 1
         writer.Write((byte)0x00);
-        writer.Write((byte)0x00); // Authority: 0
+        writer.Write((byte)0x03);
         writer.Write((byte)0x00);
-        writer.Write((byte)0x00); // Additional: 0
+        writer.Write((byte)0x00);
+        writer.Write((byte)0x00);
+        writer.Write((byte)0x00);
         
-        // SRV record
         WriteName(writer, serviceName);
         writer.Write((byte)0x00);
-        writer.Write((byte)0x21); // Type: SRV (33)
+        writer.Write((byte)0x21);
         writer.Write((byte)0x00);
-        writer.Write((byte)0x01); // Class: IN
+        writer.Write((byte)0x01);
+        writer.Write((byte)((ttl >> 24) & 0xFF));
+        writer.Write((byte)((ttl >> 16) & 0xFF));
+        writer.Write((byte)((ttl >> 8) & 0xFF));
+        writer.Write((byte)(ttl & 0xFF));
+        ushort srvLen = (ushort)(6 + 1);
+        writer.Write((byte)((srvLen >> 8) & 0xFF));
+        writer.Write((byte)(srvLen & 0xFF));
         writer.Write((byte)0x00);
         writer.Write((byte)0x00);
-        writer.Write((byte)0x11);
-        writer.Write((byte)0x94); // TTL: 4500
         writer.Write((byte)0x00);
-        writer.Write((byte)0x08); // Data length: 8
         writer.Write((byte)0x00);
-        writer.Write((byte)0x00); // Priority
-        writer.Write((byte)0x00);
-        writer.Write((byte)0x00); // Weight
         writer.Write((byte)((_port >> 8) & 0xFF));
-        writer.Write((byte)(_port & 0xFF)); // Port
-        WriteName(writer, localDomain); // Target
+        writer.Write((byte)(_port & 0xFF));
+        writer.Write((byte)0x00);
+        
+        WriteName(writer, serviceName);
+        writer.Write((byte)0x00);
+        writer.Write((byte)0x01);
+        writer.Write((byte)0x00);
+        writer.Write((byte)0x01);
+        writer.Write((byte)((ttl >> 24) & 0xFF));
+        writer.Write((byte)((ttl >> 16) & 0xFF));
+        writer.Write((byte)((ttl >> 8) & 0xFF));
+        writer.Write((byte)(ttl & 0xFF));
+        writer.Write((byte)0x00);
+        writer.Write((byte)0x04);
+        writer.Write(ipBytes);
+        
+        WriteName(writer, serviceName);
+        writer.Write((byte)0x00);
+        writer.Write((byte)0x10);
+        writer.Write((byte)0x00);
+        writer.Write((byte)0x01);
+        writer.Write((byte)((ttl >> 24) & 0xFF));
+        writer.Write((byte)((ttl >> 16) & 0xFF));
+        writer.Write((byte)((ttl >> 8) & 0xFF));
+        writer.Write((byte)(ttl & 0xFF));
+        ushort txtLen = (ushort)(1 + txtBytes.Length);
+        writer.Write((byte)((txtLen >> 8) & 0xFF));
+        writer.Write((byte)(txtLen & 0xFF));
+        writer.Write((byte)txtEntry.Length);
+        writer.Write(txtBytes);
         
         return ms.ToArray();
     }
@@ -158,91 +191,180 @@ public class NetworkMidi2Server : IDisposable
     
     private void ProcessPacket(byte[] data, IPEndPoint remoteEP)
     {
-        if (data.Length < 4) return;
-        
-        byte cmdByte = data[0];
-        byte cmd = (byte)(cmdByte & 0x0F);
-        byte status = data[1];
-        byte ssrc = data[2];
-        byte remoteSSRC = data[3];
-        
-        if (cmdByte == 0x10)
+        if (!NetworkMidi2Protocol.ParseUDPPacket(data, out var commandPackets))
         {
-            ProcessUMPData(data, remoteEP);
+            Log($"[NM2 Server] Invalid packet signature");
             return;
         }
         
-        switch (cmd)
+        foreach (var cmdPacket in commandPackets)
         {
-            case 0x01:
-                if (status == 0x00)
-                {
-                    ProcessInvitation(data, remoteEP, ssrc);
-                }
+            ProcessCommandPacket(cmdPacket, remoteEP);
+        }
+    }
+    
+    private void ProcessCommandPacket(byte[] cmdPacket, IPEndPoint remoteEP)
+    {
+        if (!NetworkMidi2Protocol.ParseCommandPacket(cmdPacket, out var cmdCode, out var payloadLen, out var cmdSpecific1, out var cmdSpecific2, out var payload))
+        {
+            return;
+        }
+        
+        switch (cmdCode)
+        {
+            case NetworkMidi2Protocol.CommandCode.Invitation:
+                ProcessInvitation(payload, cmdSpecific1, remoteEP);
                 break;
                 
-            case 0x02:
-                Log($"[NM2 Server] END SESSION from {remoteEP}");
-                _remoteEP = null;
-                _remoteSSRC = 0;
+            case NetworkMidi2Protocol.CommandCode.InvitationWithAuth:
+                ProcessInvitationWithAuth(payload, remoteEP);
                 break;
                 
-            case 0x03:
-                if (status == 0x00)
-                {
-                    var pong = new byte[] { 0x03, 0x01, _localSSRC, ssrc };
-                    _dataServer?.Send(pong, pong.Length, remoteEP);
-                    Log($"[NM2 Server] PING from {remoteEP}, sent PONG");
-                }
+            case NetworkMidi2Protocol.CommandCode.InvitationWithUserAuth:
+                ProcessInvitationWithUserAuth(payload, remoteEP);
+                break;
+                
+            case NetworkMidi2Protocol.CommandCode.Ping:
+                ProcessPing(payload, remoteEP);
+                break;
+                
+            case NetworkMidi2Protocol.CommandCode.Bye:
+                ProcessBye(payload, remoteEP);
+                break;
+                
+            case NetworkMidi2Protocol.CommandCode.SessionReset:
+                ProcessSessionReset(remoteEP);
+                break;
+                
+            case NetworkMidi2Protocol.CommandCode.RetransmitRequest:
+                ProcessRetransmitRequest(payload);
+                break;
+                
+            case NetworkMidi2Protocol.CommandCode.UMPData:
+                NetworkMidi2Protocol.ParseUMPDataCommand(cmdSpecific1, cmdSpecific2, payload, out var seq, out var umpData);
+                ProcessUMPData(seq, umpData);
+                break;
+                
+            default:
+                Log($"[NM2 Server] Unknown command: 0x{((byte)cmdCode):X2}");
                 break;
         }
     }
     
-    private void ProcessInvitation(byte[] data, IPEndPoint remoteEP, byte ssrc)
+    private void ProcessInvitation(byte[] payload, byte nameWords, IPEndPoint remoteEP)
     {
-        _remoteSSRC = ssrc;
+        if (!NetworkMidi2Protocol.ParseInvitationCommand(payload, nameWords, out var umpEndpointName, out var productInstanceId, out var capabilities))
+        {
+            Log("[NM2 Server] Failed to parse invitation");
+            SendNAK(NetworkMidi2Protocol.NAKReason.CommandMalformed, new byte[4], remoteEP);
+            return;
+        }
+        
         _remoteEP = remoteEP;
         
-        string name = "";
-        if (data.Length > 6)
-        {
-            int offset = 4;
-            int nameLength = (data[offset] << 8) | data[offset + 1];
-            offset += 2;
-            if (offset + nameLength <= data.Length)
-            {
-                name = Encoding.UTF8.GetString(data, offset, nameLength);
-            }
-        }
+        var replyCmd = NetworkMidi2Protocol.CreateInvitationReplyAccepted(_serviceName, _productId);
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(replyCmd);
+        _dataServer?.Send(packet, packet.Length, remoteEP);
         
-        var reply = new byte[] { 0x01, 0x01, _localSSRC, ssrc };
-        _dataServer?.Send(reply, reply.Length, remoteEP);
-        
-        Log($"[NM2 Server] INV from {remoteEP} (name: {name}), sent ACCEPT");
-        Log($"[NM2 Server] Connected! SSRC: {_localSSRC:X2} <-> {ssrc:X2}");
+        Log($"[NM2 Server] INV from {remoteEP} (name: {umpEndpointName}, product: {productInstanceId})");
+        Log($"[NM2 Server] Sent INV_ACCEPTED");
     }
     
-    private void ProcessUMPData(byte[] data, IPEndPoint remoteEP)
+    private void ProcessInvitationWithAuth(byte[] payload, IPEndPoint remoteEP)
     {
-        if (data.Length < 5) return;
+        if (!NetworkMidi2Protocol.ParseInvitationWithAuth(payload, out var authDigest))
+        {
+            SendNAK(NetworkMidi2Protocol.NAKReason.CommandMalformed, new byte[4], remoteEP);
+            return;
+        }
         
-        ushort seq = (ushort)((data[1] << 8) | data[2]);
+        Log($"[NM2 Server] INV_WITH_AUTH from {remoteEP}, digest: {BitConverter.ToString(authDigest).Replace("-", "")[..16]}...");
         
-        byte[] umpData = new byte[data.Length - 4];
-        Buffer.BlockCopy(data, 4, umpData, 0, umpData.Length);
+        _remoteEP = remoteEP;
         
-        Log($"[NM2 Server] UMP Data seq={seq}, {umpData.Length} bytes");
+        var replyCmd = NetworkMidi2Protocol.CreateInvitationReplyAccepted(_serviceName, _productId);
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(replyCmd);
+        _dataServer?.Send(packet, packet.Length, remoteEP);
+        
+        Log($"[NM2 Server] Sent INV_ACCEPTED (auth accepted)");
+    }
+    
+    private void ProcessInvitationWithUserAuth(byte[] payload, IPEndPoint remoteEP)
+    {
+        if (!NetworkMidi2Protocol.ParseInvitationWithUserAuth(payload, out var authDigest, out var username))
+        {
+            SendNAK(NetworkMidi2Protocol.NAKReason.CommandMalformed, new byte[4], remoteEP);
+            return;
+        }
+        
+        Log($"[NM2 Server] INV_WITH_USER_AUTH from {remoteEP}, user: {username}");
+        
+        _remoteEP = remoteEP;
+        
+        var replyCmd = NetworkMidi2Protocol.CreateInvitationReplyAccepted(_serviceName, _productId);
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(replyCmd);
+        _dataServer?.Send(packet, packet.Length, remoteEP);
+        
+        Log($"[NM2 Server] Sent INV_ACCEPTED (user auth accepted)");
+    }
+    
+    private void ProcessPing(byte[] payload, IPEndPoint remoteEP)
+    {
+        if (!NetworkMidi2Protocol.ParsePingCommand(payload, out var pingId))
+        {
+            return;
+        }
+        
+        var replyCmd = NetworkMidi2Protocol.CreatePingReplyCommand(pingId);
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(replyCmd);
+        _dataServer?.Send(packet, packet.Length, remoteEP);
+        
+        Log($"[NM2 Server] PING id={pingId}, sent PONG");
+    }
+    
+    private void ProcessBye(byte[] payload, IPEndPoint remoteEP)
+    {
+        NetworkMidi2Protocol.ParseByeCommand(payload, out var reason, out var textMessage);
+        
+        var replyCmd = NetworkMidi2Protocol.CreateByeReplyCommand();
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(replyCmd);
+        _dataServer?.Send(packet, packet.Length, remoteEP);
+        
+        Log($"[NM2 Server] BYE received, reason: {reason}, message: {textMessage}");
+        
+        _remoteEP = null;
+        _remoteSSRC = 0;
+    }
+    
+    private void ProcessSessionReset(IPEndPoint remoteEP)
+    {
+        var replyCmd = NetworkMidi2Protocol.CreateSessionResetReplyCommand();
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(replyCmd);
+        _dataServer?.Send(packet, packet.Length, remoteEP);
+        
+        _sendSequence = 0;
+        Log("[NM2 Server] SESSION_RESET received, sent reply, sequence reset");
+    }
+    
+    private void ProcessRetransmitRequest(byte[] payload)
+    {
+        NetworkMidi2Protocol.ParseRetransmitRequest(payload, out var seqNum, out var numCommands);
+        Log($"[NM2 Server] RETRANSMIT_REQUEST seq={seqNum}, count={numCommands}");
+        
+        var errorCmd = NetworkMidi2Protocol.CreateRetransmitErrorCommand(NetworkMidi2Protocol.RetransmitErrorReason.BufferDoesNotContainSequence, seqNum);
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(errorCmd);
+        _dataServer?.Send(packet, packet.Length, _remoteEP);
+    }
+    
+    private void ProcessUMPData(ushort sequenceNumber, byte[] umpData)
+    {
+        Log($"[NM2 Server] UMP Data seq={sequenceNumber}, {umpData.Length} bytes");
         
         int offset = 0;
         while (offset + 4 <= umpData.Length)
         {
             int mt = (umpData[offset] >> 4) & 0x0F;
-            int packetSize = mt switch
-            {
-                0x2 => 4,
-                0x4 => 8,
-                _ => 4
-            };
+            int packetSize = NetworkMidi2Protocol.GetUMPPacketSize(mt);
             
             if (offset + packetSize > umpData.Length) break;
             
@@ -250,7 +372,7 @@ public class NetworkMidi2Server : IDisposable
             {
                 byte[] midiData = new byte[] { umpData[offset + 1], umpData[offset + 2], umpData[offset + 3] };
                 OnMidiReceived?.Invoke(midiData);
-                Log($"[NM2 Server] -> MIDI: {BitConverter.ToString(midiData)}");
+                Log($"[NM2 Server] -> MIDI1: {BitConverter.ToString(midiData)}");
             }
             else if (mt == 0x4 && packetSize >= 8)
             {
@@ -260,14 +382,20 @@ public class NetworkMidi2Server : IDisposable
                 byte vel7 = (byte)(velocity >> 9);
                 byte[] midiData = new byte[] { status, note, vel7 };
                 OnMidiReceived?.Invoke(midiData);
-                Log($"[NM2 Server] -> MIDI: {BitConverter.ToString(midiData)} (vel16={velocity})");
+                Log($"[NM2 Server] -> MIDI2: {BitConverter.ToString(midiData)} (vel16={velocity})");
             }
             
             offset += packetSize;
         }
     }
     
-    private ushort _sendSequence;
+    private void SendNAK(NetworkMidi2Protocol.NAKReason reason, byte[] originalHeader, IPEndPoint remoteEP)
+    {
+        var nakCmd = NetworkMidi2Protocol.CreateNAKCommand(reason, originalHeader);
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(nakCmd);
+        _dataServer?.Send(packet, packet.Length, remoteEP);
+        Log($"[NM2 Server] Sent NAK, reason: {reason}");
+    }
     
     public void SendMidi(byte[] midiData)
     {
@@ -283,42 +411,103 @@ public class NetworkMidi2Server : IDisposable
         umpData[6] = (byte)((midiData[2] << 9) & 0xFF);
         umpData[7] = 0;
         
-        var packet = new byte[4 + umpData.Length];
-        packet[0] = 0x10;
-        packet[1] = (byte)((_sendSequence >> 8) & 0xFF);
-        packet[2] = (byte)(_sendSequence & 0xFF);
-        packet[3] = 0;
-        Buffer.BlockCopy(umpData, 0, packet, 4, umpData.Length);
-        
-        _sendSequence++;
-        _dataServer.Send(packet, packet.Length, _remoteEP);
+        SendUMPData(umpData);
         Log($"[NM2 Server] Sent MIDI: {BitConverter.ToString(midiData)}");
     }
     
     public void SendNoteOn(byte note, byte velocity, byte channel = 0)
     {
         byte status = (byte)(0x90 | channel);
-        SendMidi(new byte[] { status, note, velocity });
+        ushort vel16 = (ushort)(velocity << 9);
+        
+        byte[] umpData = new byte[8];
+        umpData[0] = 0x40;
+        umpData[1] = status;
+        umpData[2] = note;
+        umpData[3] = 0;
+        umpData[4] = 0;
+        umpData[5] = (byte)((vel16 >> 8) & 0xFF);
+        umpData[6] = (byte)(vel16 & 0xFF);
+        umpData[7] = 0;
+        
+        SendUMPData(umpData);
+        Log($"[NM2 Server] Sent NoteOn: note={note}, vel={velocity}");
     }
     
     public void SendNoteOff(byte note, byte channel = 0)
     {
         byte status = (byte)(0x80 | channel);
-        SendMidi(new byte[] { status, note, 0 });
+        
+        byte[] umpData = new byte[8];
+        umpData[0] = 0x40;
+        umpData[1] = status;
+        umpData[2] = note;
+        umpData[3] = 0;
+        umpData[4] = 0;
+        umpData[5] = 0;
+        umpData[6] = 0;
+        umpData[7] = 0;
+        
+        SendUMPData(umpData);
+        Log($"[NM2 Server] Sent NoteOff: note={note}");
+    }
+    
+    public void SendPing()
+    {
+        if (_remoteEP == null || _dataServer == null)
+        {
+            Log("[NM2 Server] Not connected, cannot send PING");
+            return;
+        }
+        
+        var pingId = (uint)Random.Shared.Next();
+        var pingCmd = NetworkMidi2Protocol.CreatePingCommand(pingId);
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(pingCmd);
+        _dataServer.Send(packet, packet.Length, _remoteEP);
+        Log($"[NM2 Server] Sent PING id={pingId}");
+    }
+    
+    public void SendBye(NetworkMidi2Protocol.ByeReason reason = NetworkMidi2Protocol.ByeReason.UserTerminated)
+    {
+        if (_remoteEP == null || _dataServer == null) return;
+        
+        var byeCmd = NetworkMidi2Protocol.CreateByeCommand(reason);
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(byeCmd);
+        _dataServer.Send(packet, packet.Length, _remoteEP);
+        Log($"[NM2 Server] Sent BYE, reason: {reason}");
+    }
+    
+    private void SendUMPData(byte[] umpData)
+    {
+        if (_remoteEP == null || _dataServer == null) return;
+        
+        var umpCmd = NetworkMidi2Protocol.CreateUMPDataCommand(_sendSequence++, umpData);
+        var packet = NetworkMidi2Protocol.CreateUDPPacket(umpCmd);
+        _dataServer.Send(packet, packet.Length, _remoteEP);
     }
     
     public void Stop()
     {
-        if (_remoteEP != null && _dataServer != null && _remoteSSRC != 0)
+        if (_remoteEP != null && _dataServer != null)
         {
-            var packet = new byte[] { 0x02, 0x00, _localSSRC, _remoteSSRC };
-            _dataServer.Send(packet, packet.Length, _remoteEP);
-            Log("[NM2 Server] Sent END");
+            SendBye();
         }
         
-        _isRunning = false;
         _remoteEP = null;
         _remoteSSRC = 0;
+    }
+    
+    private IPAddress GetLocalIPAddress()
+    {
+        var host = Dns.GetHostEntry(Dns.GetHostName());
+        foreach (var ip in host.AddressList)
+        {
+            if (ip.AddressFamily == AddressFamily.InterNetwork)
+            {
+                return ip;
+            }
+        }
+        return IPAddress.Loopback;
     }
     
     private void Log(string message)
