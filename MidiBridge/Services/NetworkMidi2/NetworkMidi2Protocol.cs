@@ -23,6 +23,11 @@ public static class NetworkMidi2Protocol
     public const int RETRANSMIT_MAX_RETRY = 5;
     public const int RETRANSMIT_BUFFER_SIZE = 64;
 
+    public const int COMMAND_RETRY_INTERVAL_MS = 100;
+    public const int COMMAND_MAX_RETRY = 5;
+    public const int MAX_SESSIONS = 16;
+    public const int PENDING_INVITATION_TIMEOUT_MS = 30000;
+
     public enum CommandCode : byte
     {
         UMPData = 0xFF,
@@ -131,6 +136,12 @@ public static class NetworkMidi2Protocol
         public List<ushort> MissingSequences;
         public DateTime LastRetransmitRequest;
         public int RetransmitRetryCount;
+
+        public int PendingRetryCount;
+        public DateTime PendingCommandSent;
+        public bool NeedsAllNotesOff;
+        public string CryptoNonce;
+        public bool SupportsRetransmit;
     }
 
     public class DiscoveredDevice

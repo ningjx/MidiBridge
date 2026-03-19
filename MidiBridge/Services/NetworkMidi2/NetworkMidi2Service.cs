@@ -31,6 +31,11 @@ public class NetworkMidi2Service : INetworkMidi2Service
     public event EventHandler<string>? StatusChanged;
     public event EventHandler<NetworkMidi2Protocol.DiscoveredDevice>? DeviceDiscovered;
 
+    public event EventHandler<(string SessionId, string DeviceName, string Host, int Port)>? InvitationReceived;
+    public event EventHandler<(string SessionId, int LostPackets)>? RetransmitErrorReceived;
+
+    public int MaxSessions { get; set; } = NetworkMidi2Protocol.MAX_SESSIONS;
+
     public ObservableCollection<MidiDevice> InputDevices { get; } = new();
     public ObservableCollection<MidiDevice> OutputDevices { get; } = new();
     public bool IsRunning => _isRunning;
@@ -67,6 +72,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
             Task.Run(() => PingLoop(_cts.Token));
             Task.Run(() => SessionTimeoutCheckLoop(_cts.Token));
             Task.Run(() => IdlePeriodLoop(_cts.Token));
+            Task.Run(() => PendingInvitationTimeoutLoop(_cts.Token));
 
             OnStatusChanged($"Network MIDI 2.0 服务已启动: 端口 {port}");
             Log.Information("[NM2] 服务启动成功: 端口 {Port}", port);
@@ -233,6 +239,37 @@ public class NetworkMidi2Service : INetworkMidi2Service
             return;
         }
 
+        int establishedCount = _sessions.Values.Count(s => s.State == NetworkMidi2Protocol.SessionState.Established);
+        if (establishedCount >= MaxSessions)
+        {
+            var bye = NetworkMidi2Protocol.CreateByeCommand(NetworkMidi2Protocol.ByeReason.InvitationFailedTooManySessions);
+            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(bye), remoteEP);
+            Log.Warning("[NM2] 拒绝连接: 已达最大会话数 {MaxSessions}", MaxSessions);
+            return;
+        }
+
+        bool userAccepted = OnInvitationReceived(sessionId, name, remoteEP.Address.ToString(), remoteEP.Port);
+
+        if (!userAccepted)
+        {
+            var pending = NetworkMidi2Protocol.CreateInvitationReplyPending(_serviceName, _productInstanceId);
+            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(pending), remoteEP);
+            Log.Information("[NM2] 邀请等待用户确认: {Name} 来自 {RemoteEP}", name, remoteEP);
+
+            var pendingSession = new NetworkMidi2Protocol.SessionInfo
+            {
+                Id = sessionId,
+                RemoteName = name,
+                RemoteHost = remoteEP.Address.ToString(),
+                RemotePort = remoteEP.Port,
+                State = NetworkMidi2Protocol.SessionState.PendingInvitation,
+                LastActivity = DateTime.Now,
+                RemoteCapabilities = capabilities,
+            };
+            _sessions[sessionId] = pendingSession;
+            return;
+        }
+
         var session = new NetworkMidi2Protocol.SessionInfo
         {
             Id = sessionId,
@@ -248,6 +285,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
             ReceiveSequence = 0,
             RetransmitBuffer = new List<byte[]>(),
             RemoteCapabilities = capabilities,
+            SupportsRetransmit = true,
         };
 
         _sessions[sessionId] = session;
@@ -258,6 +296,67 @@ public class NetworkMidi2Service : INetworkMidi2Service
         AddDevice(session);
 
         Log.Information("[NM2] 会话已接受: {Name} 来自 {RemoteEP}", name, remoteEP);
+    }
+
+    private bool OnInvitationReceived(string sessionId, string deviceName, string host, int port)
+    {
+        var handler = InvitationReceived;
+        if (handler != null)
+        {
+            var args = (sessionId, deviceName, host, port);
+            handler.Invoke(this, args);
+            return false;
+        }
+        return true;
+    }
+
+    public void AcceptPendingInvitation(string sessionId)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session)) return;
+        if (session.State != NetworkMidi2Protocol.SessionState.PendingInvitation) return;
+
+        try
+        {
+            var ep = new IPEndPoint(IPAddress.Parse(session.RemoteHost), session.RemotePort);
+
+            session.State = NetworkMidi2Protocol.SessionState.Established;
+            session.LastActivity = DateTime.Now;
+            session.LastPingReceived = DateTime.Now;
+            session.RetransmitBuffer = new List<byte[]>();
+            session.SupportsRetransmit = true;
+            _sessions[sessionId] = session;
+
+            var reply = NetworkMidi2Protocol.CreateInvitationReplyAccepted(_serviceName, _productInstanceId);
+            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(reply), ep);
+
+            AddDevice(session);
+            Log.Information("[NM2] 用户确认接受邀请: {Name}", session.RemoteName);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[NM2] 接受邀请失败");
+        }
+    }
+
+    public void RejectPendingInvitation(string sessionId)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session)) return;
+        if (session.State != NetworkMidi2Protocol.SessionState.PendingInvitation) return;
+
+        try
+        {
+            var ep = new IPEndPoint(IPAddress.Parse(session.RemoteHost), session.RemotePort);
+
+            var bye = NetworkMidi2Protocol.CreateByeCommand(NetworkMidi2Protocol.ByeReason.InvitationRejectedByUser);
+            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(bye), ep);
+
+            _sessions.TryRemove(sessionId, out _);
+            Log.Information("[NM2] 用户拒绝邀请: {Name}", session.RemoteName);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[NM2] 拒绝邀请失败");
+        }
     }
 
     private void HandleInvitationReplyAccepted(byte[] payload, byte nameWords, IPEndPoint remoteEP, string sessionId)
@@ -566,37 +665,62 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
     private void HandleRetransmitError(byte[] payload, string sessionId)
     {
+        if (!_sessions.TryGetValue(sessionId, out var session)) return;
+
         Log.Warning("[NM2] 收到 Retransmit Error: {SessionId}", sessionId);
+
+        SendAllNotesOff(sessionId);
+
+        int lostPackets = session.MissingSequences?.Count ?? 0;
+        RetransmitErrorReceived?.Invoke(this, (sessionId, lostPackets));
+
+        OnStatusChanged($"重传错误: {session.RemoteName}, 丢失 {lostPackets} 个包");
     }
 
     private void HandleSessionReset(IPEndPoint remoteEP, string sessionId)
     {
-        if (_sessions.TryGetValue(sessionId, out var session))
+        if (!_sessions.TryGetValue(sessionId, out var session)) return;
+
+        if (session.State != NetworkMidi2Protocol.SessionState.Established)
         {
-            session.SendSequence = 0;
-            session.ReceiveSequence = 0;
-            session.RetransmitBuffer?.Clear();
-            session.LastActivity = DateTime.Now;
-            _sessions[sessionId] = session;
-
-            var reply = NetworkMidi2Protocol.CreateSessionResetReplyCommand();
-            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(reply), remoteEP);
-
-            Log.Information("[NM2] 会话重置: {SessionId}", sessionId);
+            var bye = NetworkMidi2Protocol.CreateByeCommand(NetworkMidi2Protocol.ByeReason.SessionNotEstablished);
+            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(bye), remoteEP);
+            return;
         }
+
+        session.SendSequence = 0;
+        session.ReceiveSequence = 0;
+        session.RetransmitBuffer?.Clear();
+        session.MissingSequences?.Clear();
+        session.RetransmitRetryCount = 0;
+        session.LastActivity = DateTime.Now;
+        _sessions[sessionId] = session;
+
+        var reply = NetworkMidi2Protocol.CreateSessionResetReplyCommand();
+        SendPacket(NetworkMidi2Protocol.CreateUDPPacket(reply), remoteEP);
+
+        SendAllNotesOff(sessionId);
+
+        Log.Information("[NM2] 会话重置: {SessionId}", sessionId);
     }
 
     private void HandleSessionResetReply(string sessionId)
     {
-        if (_sessions.TryGetValue(sessionId, out var session))
-        {
-            session.SendSequence = 0;
-            session.ReceiveSequence = 0;
-            session.RetransmitBuffer?.Clear();
-            _sessions[sessionId] = session;
+        if (!_sessions.TryGetValue(sessionId, out var session)) return;
 
-            Log.Information("[NM2] 会话重置确认: {SessionId}", sessionId);
+        if (session.State == NetworkMidi2Protocol.SessionState.PendingSessionReset)
+        {
+            session.State = NetworkMidi2Protocol.SessionState.Established;
+            session.PendingRetryCount = 0;
         }
+
+        session.SendSequence = 0;
+        session.ReceiveSequence = 0;
+        session.RetransmitBuffer?.Clear();
+        session.MissingSequences?.Clear();
+        _sessions[sessionId] = session;
+
+        Log.Information("[NM2] 会话重置确认: {SessionId}", sessionId);
     }
 
     private void HandleBye(byte[] payload, IPEndPoint remoteEP, string sessionId)
@@ -608,18 +732,22 @@ public class NetworkMidi2Service : INetworkMidi2Service
             var reply = NetworkMidi2Protocol.CreateByeReplyCommand();
             SendPacket(NetworkMidi2Protocol.CreateUDPPacket(reply), remoteEP);
 
+            SendAllNotesOff(sessionId);
+
             string stableId = GetStableDeviceId(session.RemoteName, session.RemoteHost);
             RemoveDevice(stableId);
 
             Log.Information("[NM2] 会话结束: {Name}, 原因: {Reason}", session.RemoteName, reason);
-            OnStatusChanged($"会话结束: {session.RemoteName}");
+            OnStatusChanged($"会话结束: {session.RemoteName} (原因: {reason})");
         }
     }
 
     private void HandleByeReply(string sessionId)
     {
-        _sessions.TryRemove(sessionId, out _);
-        Log.Debug("[NM2] 收到 Bye Reply: {SessionId}", sessionId);
+        if (_sessions.TryRemove(sessionId, out var session))
+        {
+            Log.Debug("[NM2] 收到 Bye Reply: {SessionId}", sessionId);
+        }
     }
 
     private void HandleNAK(byte[] payload, string sessionId)
@@ -704,12 +832,97 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
     public void EndSession(string sessionId)
     {
-        if (_sessions.TryRemove(sessionId, out var session))
+        if (!_sessions.TryGetValue(sessionId, out var session)) return;
+
+        _ = Task.Run(async () =>
         {
-            SendBye(session, NetworkMidi2Protocol.ByeReason.UserTerminated);
-            string stableId = GetStableDeviceId(session.RemoteName, session.RemoteHost);
-            RemoveDevice(stableId);
+            session.State = NetworkMidi2Protocol.SessionState.PendingBye;
+            session.PendingRetryCount = 0;
+            _sessions[sessionId] = session;
+
+            for (int i = 0; i < NetworkMidi2Protocol.COMMAND_MAX_RETRY; i++)
+            {
+                if (!_sessions.ContainsKey(sessionId)) break;
+
+                SendBye(session, NetworkMidi2Protocol.ByeReason.UserTerminated);
+
+                await Task.Delay(NetworkMidi2Protocol.COMMAND_RETRY_INTERVAL_MS);
+
+                if (!_sessions.TryGetValue(sessionId, out var s) || s.State != NetworkMidi2Protocol.SessionState.PendingBye)
+                    break;
+
+                session.PendingRetryCount++;
+                _sessions[sessionId] = session;
+            }
+
+            if (_sessions.TryRemove(sessionId, out var removed))
+            {
+                string stableId = GetStableDeviceId(removed.RemoteName, removed.RemoteHost);
+                RemoveDevice(stableId);
+                Log.Information("[NM2] 会话已结束: {Name}", removed.RemoteName);
+            }
+        });
+    }
+
+    public void RequestSessionReset(string sessionId)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session)) return;
+        if (session.State != NetworkMidi2Protocol.SessionState.Established) return;
+
+        _ = Task.Run(async () =>
+        {
+            session.State = NetworkMidi2Protocol.SessionState.PendingSessionReset;
+            session.PendingRetryCount = 0;
+            session.PendingCommandSent = DateTime.Now;
+            _sessions[sessionId] = session;
+
+            var ep = new IPEndPoint(IPAddress.Parse(session.RemoteHost), session.RemotePort);
+
+            for (int i = 0; i < NetworkMidi2Protocol.COMMAND_MAX_RETRY; i++)
+            {
+                if (!_sessions.TryGetValue(sessionId, out var s)) break;
+                if (s.State != NetworkMidi2Protocol.SessionState.PendingSessionReset) break;
+
+                var reset = NetworkMidi2Protocol.CreateSessionResetCommand();
+                SendPacket(NetworkMidi2Protocol.CreateUDPPacket(reset), ep);
+
+                await Task.Delay(NetworkMidi2Protocol.COMMAND_RETRY_INTERVAL_MS);
+
+                if (_sessions.TryGetValue(sessionId, out var current) && current.State == NetworkMidi2Protocol.SessionState.Established)
+                    break;
+
+                session.PendingRetryCount++;
+                _sessions[sessionId] = session;
+            }
+
+            if (_sessions.TryGetValue(sessionId, out var final) && final.State == NetworkMidi2Protocol.SessionState.PendingSessionReset)
+            {
+                Log.Warning("[NM2] Session Reset 超时: {SessionId}", sessionId);
+                EndSession(sessionId);
+            }
+        });
+    }
+
+    private void SendAllNotesOff(string sessionId)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session)) return;
+
+        var ep = new IPEndPoint(IPAddress.Parse(session.RemoteHost), session.RemotePort);
+
+        for (byte channel = 0; channel < 16; channel++)
+        {
+            byte[] allNotesOff = new byte[] { (byte)(0xB0 | channel), 0x7B, 0x00 };
+            var ump = ConvertMidi1ToUMP(allNotesOff);
+            if (ump.Length > 0)
+            {
+                session.SendSequence++;
+                var cmd = NetworkMidi2Protocol.CreateUMPDataCommand(session.SendSequence, ump);
+                SendPacket(NetworkMidi2Protocol.CreateUDPPacket(cmd), ep);
+            }
         }
+
+        _sessions[sessionId] = session;
+        Log.Debug("[NM2] 已发送 All Notes Off: {SessionId}", sessionId);
     }
 
     public void SendUMP(string sessionId, byte[] umpData)
@@ -950,6 +1163,52 @@ public class NetworkMidi2Service : INetworkMidi2Service
                             NetworkMidi2Protocol.IDLE_MAX_INTERVAL_MS);
 
                         _sessions[kvp.Key] = session;
+                    }
+                }
+            }
+            catch (OperationCanceledException) { break; }
+            catch (ObjectDisposedException) { break; }
+            catch { break; }
+        }
+    }
+
+    private async void PendingInvitationTimeoutLoop(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(1000, ct);
+
+                var now = DateTime.Now;
+                var expiredInvitations = new List<string>();
+
+                foreach (var kvp in _sessions)
+                {
+                    var session = kvp.Value;
+                    if (session.State != NetworkMidi2Protocol.SessionState.PendingInvitation) continue;
+
+                    var pendingMs = (now - session.LastActivity).TotalMilliseconds;
+                    if (pendingMs > NetworkMidi2Protocol.PENDING_INVITATION_TIMEOUT_MS)
+                    {
+                        expiredInvitations.Add(kvp.Key);
+                    }
+                }
+
+                foreach (var sessionId in expiredInvitations)
+                {
+                    if (_sessions.TryRemove(sessionId, out var session))
+                    {
+                        try
+                        {
+                            var ep = new IPEndPoint(IPAddress.Parse(session.RemoteHost), session.RemotePort);
+                            var bye = NetworkMidi2Protocol.CreateByeCommand(NetworkMidi2Protocol.ByeReason.Timeout);
+                            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(bye), ep);
+                        }
+                        catch { }
+
+                        Log.Information("[NM2] 待确认邀请超时: {Name}", session.RemoteName);
+                        OnStatusChanged($"邀请超时: {session.RemoteName}");
                     }
                 }
             }

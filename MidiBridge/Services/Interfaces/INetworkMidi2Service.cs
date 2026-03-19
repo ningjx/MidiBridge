@@ -69,6 +69,29 @@ public interface INetworkMidi2Service : IDisposable
     void EndSession(string sessionId);
 
     /// <summary>
+    /// 请求会话重置。
+    /// </summary>
+    /// <param name="sessionId">会话ID。</param>
+    void RequestSessionReset(string sessionId);
+
+    /// <summary>
+    /// 接受待确认的邀请。
+    /// </summary>
+    /// <param name="sessionId">会话ID。</param>
+    void AcceptPendingInvitation(string sessionId);
+
+    /// <summary>
+    /// 拒绝待确认的邀请。
+    /// </summary>
+    /// <param name="sessionId">会话ID。</param>
+    void RejectPendingInvitation(string sessionId);
+
+    /// <summary>
+    /// 获取或设置最大会话数。
+    /// </summary>
+    int MaxSessions { get; set; }
+
+    /// <summary>
     /// 发送 UMP 数据。
     /// </summary>
     /// <param name="sessionId">会话ID。</param>
@@ -111,4 +134,14 @@ public interface INetworkMidi2Service : IDisposable
     /// 设备发现事件。
     /// </summary>
     event EventHandler<NetworkMidi2Protocol.DiscoveredDevice>? DeviceDiscovered;
+
+    /// <summary>
+    /// 收到邀请事件（需要用户确认）。
+    /// </summary>
+    event EventHandler<(string SessionId, string DeviceName, string Host, int Port)>? InvitationReceived;
+
+    /// <summary>
+    /// 收到重传错误事件。
+    /// </summary>
+    event EventHandler<(string SessionId, int LostPackets)>? RetransmitErrorReceived;
 }
