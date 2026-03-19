@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using System.Windows.Input;
 using MidiBridge.Models;
 using MidiBridge.Services;
+using MidiBridge.Services.Interfaces;
 using MidiBridge.Services.NetworkMidi2;
 using Serilog;
 
@@ -10,8 +11,9 @@ namespace MidiBridge.ViewModels;
 
 public class MainViewModel : ViewModelBase
 {
-    private readonly MidiDeviceManager _deviceManager;
-    private readonly ConfigService _configService;
+    private readonly IMidiDeviceManager _deviceManager;
+    private readonly IConfigService _configService;
+    private readonly MidiRouter _router;
     private string _statusMessage = "就绪";
     private MidiDevice? _selectedInputDevice;
     private MidiDevice? _selectedOutputDevice;
@@ -27,10 +29,10 @@ public class MainViewModel : ViewModelBase
 
     public ObservableCollection<MidiDevice> InputDevices => _deviceManager.InputDevices;
     public ObservableCollection<MidiDevice> OutputDevices => _deviceManager.OutputDevices;
-    public ObservableCollection<MidiRoute> Routes => _deviceManager.Router.Routes;
+    public ObservableCollection<MidiRoute> Routes => _router.Routes;
     public ObservableCollection<NetworkMidi2Protocol.DiscoveredDevice> DiscoveredNM2Devices => _deviceManager.DiscoveredNM2Devices;
 
-    public ConfigService ConfigService => _configService;
+    public IConfigService ConfigService => _configService;
 
     public int RtpPort
     {
@@ -117,22 +119,34 @@ public class MainViewModel : ViewModelBase
 
     public void ToggleRouteEnabled(string routeId)
     {
-        var route = _deviceManager.Router.Routes.FirstOrDefault(r => r.Id == routeId);
+        var route = _router.Routes.FirstOrDefault(r => r.Id == routeId);
         if (route != null)
         {
-            _deviceManager.Router.EnableRoute(routeId, !route.IsEnabled);
+            _router.EnableRoute(routeId, !route.IsEnabled);
         }
     }
 
-    public MainViewModel()
+    /// <summary>
+    /// 构造函数（用于设计器）。
+    /// </summary>
+    public MainViewModel() : this(new ConfigService(), new MidiDeviceManager(new ConfigService()))
     {
-        _configService = new ConfigService();
-        _configService.Load();
+    }
+
+    /// <summary>
+    /// 构造函数（用于依赖注入）。
+    /// </summary>
+    /// <param name="configService">配置服务。</param>
+    /// <param name="deviceManager">设备管理器。</param>
+    public MainViewModel(IConfigService configService, IMidiDeviceManager deviceManager)
+    {
+        _configService = configService ?? throw new ArgumentNullException(nameof(configService));
+        _deviceManager = deviceManager ?? throw new ArgumentNullException(nameof(deviceManager));
+        _router = ((MidiDeviceManager)deviceManager).Router;
 
         _rtpPort = _configService.Config.Network.RtpPort;
         _nm2Port = _configService.Config.Network.NM2Port;
 
-        _deviceManager = new MidiDeviceManager(_configService);
         _deviceManager.StatusChanged += (_, msg) => StatusMessage = msg;
         _deviceManager.DeviceAdded += OnDeviceAdded;
         _deviceManager.DeviceRemoved += OnDeviceRemoved;
@@ -168,7 +182,7 @@ public class MainViewModel : ViewModelBase
     public void Initialize()
     {
         _deviceManager.ScanLocalDevices();
-        _deviceManager.Router.TryRestoreAllRoutes();
+        _router.TryRestoreAllRoutes();
         ValidatePorts();
 
         if (_configService.Config.Network.AutoStart)
@@ -352,14 +366,14 @@ public class MainViewModel : ViewModelBase
     {
         if (_selectedInputDevice == null || _selectedOutputDevice == null) return;
 
-        if (_deviceManager.Router.HasRoute(_selectedInputDevice, _selectedOutputDevice))
+        if (_router.HasRoute(_selectedInputDevice, _selectedOutputDevice))
         {
             StatusMessage = "路由已存在";
             ClearSelection();
             return;
         }
 
-        var route = _deviceManager.Router.CreateRoute(_selectedInputDevice, _selectedOutputDevice);
+        var route = _router.CreateRoute(_selectedInputDevice, _selectedOutputDevice);
         if (route != null)
         {
             StatusMessage = $"路由创建: {route.DisplayName}";
@@ -373,14 +387,14 @@ public class MainViewModel : ViewModelBase
     {
         if (route == null) return;
 
-        _deviceManager.Router.RemoveRoute(route.Id);
+        _router.RemoveRoute(route.Id);
         StatusMessage = $"路由删除: {route.DisplayName}";
         OnPropertyChanged(nameof(Routes));
     }
 
     private void ClearAllRoutes()
     {
-        _deviceManager.Router.ClearAllRoutes();
+        _router.ClearAllRoutes();
         StatusMessage = "已清除所有路由";
         OnPropertyChanged(nameof(Routes));
     }

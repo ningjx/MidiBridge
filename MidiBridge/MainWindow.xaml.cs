@@ -58,10 +58,9 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
-        var vm = new MainViewModel();
-        DataContext = vm;
+        DataContext = App.MainViewModel;
         
-        var config = vm.ConfigService.Config.Window;
+        var config = App.MainViewModel.ConfigService.Config.Window;
         if (!double.IsNaN(config.Left) && !double.IsNaN(config.Top))
         {
             WindowStartupLocation = WindowStartupLocation.Manual;
