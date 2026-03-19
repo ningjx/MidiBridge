@@ -13,7 +13,7 @@ public class MainViewModel : ViewModelBase
 {
     private readonly IMidiDeviceManager _deviceManager;
     private readonly IConfigService _configService;
-    private readonly MidiRouter _router;
+    private readonly IMidiRouter _router;
     private string _statusMessage = "就绪";
     private MidiDevice? _selectedInputDevice;
     private MidiDevice? _selectedOutputDevice;
@@ -134,10 +134,12 @@ public class MainViewModel : ViewModelBase
         var configService = new ConfigService();
         var localMidiService = new LocalMidiService();
         var rtpMidiService = new RtpMidiService();
+        var networkMidi2Service = new NetworkMidi2Service();
+        var mdnsDiscoveryService = new MdnsDiscoveryService();
         
         _configService = configService;
-        _deviceManager = new MidiDeviceManager(configService, localMidiService, rtpMidiService);
-        _router = ((MidiDeviceManager)_deviceManager).Router;
+        _deviceManager = new MidiDeviceManager(configService, localMidiService, rtpMidiService, networkMidi2Service, mdnsDiscoveryService);
+        _router = _deviceManager.Router;
         
         _rtpPort = _configService.Config.Network.RtpPort;
         _nm2Port = _configService.Config.Network.NM2Port;
@@ -183,7 +185,7 @@ public class MainViewModel : ViewModelBase
     {
         _configService = configService ?? throw new ArgumentNullException(nameof(configService));
         _deviceManager = deviceManager ?? throw new ArgumentNullException(nameof(deviceManager));
-        _router = ((MidiDeviceManager)deviceManager).Router;
+        _router = _deviceManager.Router;
 
         _rtpPort = _configService.Config.Network.RtpPort;
         _nm2Port = _configService.Config.Network.NM2Port;

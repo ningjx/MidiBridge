@@ -7,9 +7,6 @@ using Serilog;
 
 namespace MidiBridge.Services;
 
-/// <summary>
-/// MIDI 设备管理器实现，作为设备协调器整合各服务。
-/// </summary>
 public class MidiDeviceManager : IMidiDeviceManager
 {
     private readonly ConcurrentDictionary<string, MidiDevice> _devices = new();
@@ -17,13 +14,12 @@ public class MidiDeviceManager : IMidiDeviceManager
     private readonly IConfigService _configService;
     private readonly ILocalMidiService _localMidiService;
     private readonly IRtpMidiService _rtpMidiService;
+    private readonly INetworkMidi2Service _networkMidi2Service;
+    private readonly IMdnsDiscoveryService _mdnsDiscoveryService;
 
     private bool _isRunning;
     private int _rtpPort = 5004;
     private int _nm2Port = 5506;
-
-    private NetworkMidi2Service? _networkMidi2Service;
-    private MdnsDiscoveryService? _mdnsDiscoveryService;
 
     public event EventHandler<MidiDevice>? DeviceAdded;
     public event EventHandler<MidiDevice>? DeviceRemoved;
@@ -59,16 +55,22 @@ public class MidiDeviceManager : IMidiDeviceManager
     public MidiDeviceManager(
         IConfigService configService,
         ILocalMidiService localMidiService,
-        IRtpMidiService rtpMidiService)
+        IRtpMidiService rtpMidiService,
+        INetworkMidi2Service networkMidi2Service,
+        IMdnsDiscoveryService mdnsDiscoveryService)
     {
         _configService = configService ?? throw new ArgumentNullException(nameof(configService));
         _localMidiService = localMidiService ?? throw new ArgumentNullException(nameof(localMidiService));
         _rtpMidiService = rtpMidiService ?? throw new ArgumentNullException(nameof(rtpMidiService));
+        _networkMidi2Service = networkMidi2Service ?? throw new ArgumentNullException(nameof(networkMidi2Service));
+        _mdnsDiscoveryService = mdnsDiscoveryService ?? throw new ArgumentNullException(nameof(mdnsDiscoveryService));
 
         _router = new MidiRouter(this, configService);
 
         SetupLocalMidiServiceEvents();
         SetupRtpMidiServiceEvents();
+        SetupNetworkMidi2ServiceEvents();
+        SetupMdnsDiscoveryServiceEvents();
     }
 
     private void SetupLocalMidiServiceEvents()
@@ -90,6 +92,45 @@ public class MidiDeviceManager : IMidiDeviceManager
             _router.RouteMessage(args.Device, args.Data);
         };
         _rtpMidiService.StatusChanged += (s, msg) => OnStatusChanged(msg);
+    }
+
+    private void SetupNetworkMidi2ServiceEvents()
+    {
+        _networkMidi2Service.DeviceAdded += (s, device) => AddDeviceToCollections(device);
+        _networkMidi2Service.DeviceRemoved += (s, device) => RemoveDeviceFromCollections(device.Id);
+        _networkMidi2Service.MidiDataReceived += (s, args) =>
+        {
+            MidiDataReceived?.Invoke(this, args);
+            _router.RouteMessage(args.Device, args.Data);
+        };
+        _networkMidi2Service.StatusChanged += (s, msg) => OnStatusChanged(msg);
+    }
+
+    private void SetupMdnsDiscoveryServiceEvents()
+    {
+        _mdnsDiscoveryService.DeviceDiscovered += (s, device) =>
+        {
+            DispatcherService.RunOnUIThread(() =>
+            {
+                if (!DiscoveredNM2Devices.Any(d => d.Name == device.Name && d.Host == device.Host))
+                {
+                    DiscoveredNM2Devices.AddSafe(device);
+                    OnStatusChanged($"发现设备: {device.Name} ({device.Host}:{device.Port})");
+                }
+            });
+        };
+
+        _mdnsDiscoveryService.DeviceLost += (s, device) =>
+        {
+            DispatcherService.RunOnUIThread(() =>
+            {
+                var existing = DiscoveredNM2Devices.FirstOrDefault(d => d.Name == device.Name && d.Host == device.Host);
+                if (existing != null)
+                {
+                    DiscoveredNM2Devices.RemoveSafe(existing);
+                }
+            });
+        };
     }
 
     public void ScanLocalDevices()
@@ -127,7 +168,12 @@ public class MidiDeviceManager : IMidiDeviceManager
             _nm2Port = nm2Port;
 
             _rtpMidiService.Start(rtpPort);
-            StartNetworkMidi2(nm2Port);
+
+            _networkMidi2Service.SetServiceInfo("MidiBridge", Guid.NewGuid().ToString("N").Substring(0, 16));
+            _networkMidi2Service.Start(nm2Port);
+
+            _mdnsDiscoveryService.SetServiceInfo("MidiBridge", nm2Port, Guid.NewGuid().ToString("N").Substring(0, 16));
+            _mdnsDiscoveryService.Start();
 
             _isRunning = true;
             OnStatusChanged($"网络服务已启动: RTP-MIDI {rtpPort}-{rtpPort + 1}, Network MIDI 2.0 {nm2Port}");
@@ -141,64 +187,14 @@ public class MidiDeviceManager : IMidiDeviceManager
         }
     }
 
-    private void StartNetworkMidi2(int port)
-    {
-        _networkMidi2Service = new NetworkMidi2Service();
-        _networkMidi2Service.SetServiceInfo("MidiBridge", Guid.NewGuid().ToString("N").Substring(0, 16));
-
-        _networkMidi2Service.DeviceAdded += (s, device) => AddDeviceToCollections(device);
-        _networkMidi2Service.DeviceRemoved += (s, device) => RemoveDeviceFromCollections(device.Id);
-        _networkMidi2Service.MidiDataReceived += (s, args) =>
-        {
-            MidiDataReceived?.Invoke(this, args);
-            _router.RouteMessage(args.Device, args.Data);
-        };
-        _networkMidi2Service.StatusChanged += (s, msg) => OnStatusChanged(msg);
-
-        _networkMidi2Service.Start(port);
-
-        _mdnsDiscoveryService = new MdnsDiscoveryService();
-        _mdnsDiscoveryService.SetServiceInfo("MidiBridge", port, Guid.NewGuid().ToString("N").Substring(0, 16));
-
-        _mdnsDiscoveryService.DeviceDiscovered += (s, device) =>
-        {
-            DispatcherService.RunOnUIThread(() =>
-            {
-                if (!DiscoveredNM2Devices.Any(d => d.Name == device.Name && d.Host == device.Host))
-                {
-                    DiscoveredNM2Devices.AddSafe(device);
-                    OnStatusChanged($"发现设备: {device.Name} ({device.Host}:{device.Port})");
-                }
-            });
-        };
-
-        _mdnsDiscoveryService.DeviceLost += (s, device) =>
-        {
-            DispatcherService.RunOnUIThread(() =>
-            {
-                var existing = DiscoveredNM2Devices.FirstOrDefault(d => d.Name == device.Name && d.Host == device.Host);
-                if (existing != null)
-                {
-                    DiscoveredNM2Devices.RemoveSafe(existing);
-                }
-            });
-        };
-
-        _mdnsDiscoveryService.Start();
-    }
-
     public void Stop()
     {
         Log.Information("[MidiDeviceManager] Stop() 被调用");
         _isRunning = false;
 
         _rtpMidiService.Stop();
-
-        _networkMidi2Service?.Stop();
-        _networkMidi2Service?.Dispose();
-
-        _mdnsDiscoveryService?.Stop();
-        _mdnsDiscoveryService?.Dispose();
+        _networkMidi2Service.Stop();
+        _mdnsDiscoveryService.Stop();
 
         RemoveNetworkDevices();
 
@@ -268,7 +264,7 @@ public class MidiDeviceManager : IMidiDeviceManager
         else if (target.Type == MidiDeviceType.NetworkMidi2)
         {
             var sessionId = GetNM2SessionId(target);
-            _networkMidi2Service?.SendMidiData(sessionId, data);
+            _networkMidi2Service.SendMidiData(sessionId, data);
             target.SentMessages++;
             target.LastActivity = DateTime.Now;
             target.PulseTransmit();
@@ -293,18 +289,17 @@ public class MidiDeviceManager : IMidiDeviceManager
 
     public async Task<bool> InviteNM2Device(string host, int port, string? name = null)
     {
-        if (_networkMidi2Service == null) return false;
         return await _networkMidi2Service.InviteDevice(host, port, name);
     }
 
     public void EndNM2Session(string sessionId)
     {
-        _networkMidi2Service?.EndSession(sessionId);
+        _networkMidi2Service.EndSession(sessionId);
     }
 
     public void RefreshNM2Discovery()
     {
-        _mdnsDiscoveryService?.QueryServices();
+        _mdnsDiscoveryService.QueryServices();
     }
 
     public void MoveDevice(string deviceId, int newIndex, bool isInput)
