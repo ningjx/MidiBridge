@@ -3,11 +3,15 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using MidiBridge.Services.Interfaces;
 using Serilog;
 
 namespace MidiBridge.Services.NetworkMidi2;
 
-public class MdnsDiscoveryService : IDisposable
+/// <summary>
+/// mDNS 发现服务实现，负责 Network MIDI 2.0 设备的发现。
+/// </summary>
+public class MdnsDiscoveryService : IMdnsDiscoveryService
 {
     private const string MDNS_MULTICAST_ADDRESS = "224.0.0.251";
     private const int MDNS_PORT = 5353;
@@ -43,6 +47,10 @@ public class MdnsDiscoveryService : IDisposable
         _productInstanceId = productInstanceId;
     }
 
+    /// <summary>
+    /// 启动发现服务。
+    /// </summary>
+    /// <returns>启动成功返回 true。</returns>
     public bool Start()
     {
         if (_isRunning) Stop();
@@ -74,6 +82,11 @@ public class MdnsDiscoveryService : IDisposable
             return false;
         }
     }
+    
+    /// <summary>
+    /// 显式接口实现。
+    /// </summary>
+    void IMdnsDiscoveryService.Start() => Start();
 
     public void Stop()
     {

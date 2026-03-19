@@ -1,11 +1,15 @@
 using System.IO;
 using System.Text.Json;
 using MidiBridge.Models;
+using MidiBridge.Services.Interfaces;
 using Serilog;
 
 namespace MidiBridge.Services;
 
-public class ConfigService
+/// <summary>
+/// 配置服务实现，负责应用程序配置的加载、保存和管理。
+/// </summary>
+public class ConfigService : IConfigService
 {
     private static readonly string AppDataDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MidiBridge");

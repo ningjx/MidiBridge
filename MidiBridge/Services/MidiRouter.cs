@@ -2,11 +2,15 @@ using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using MidiBridge.Models;
+using MidiBridge.Services.Interfaces;
 using Serilog;
 
 namespace MidiBridge.Services;
 
-public class MidiRouter
+/// <summary>
+/// MIDI 路由器实现，负责消息路由和路由管理。
+/// </summary>
+public class MidiRouter : IMidiRouter
 {
     private readonly MidiDeviceManager _deviceManager;
     private readonly ConfigService _configService;

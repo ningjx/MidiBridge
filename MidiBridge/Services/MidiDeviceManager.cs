@@ -5,13 +5,17 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using MidiBridge.Models;
+using MidiBridge.Services.Interfaces;
 using MidiBridge.Services.NetworkMidi2;
 using NAudio.Midi;
 using Serilog;
 
 namespace MidiBridge.Services;
 
-public class MidiDeviceManager : IDisposable
+/// <summary>
+/// MIDI 设备管理器实现，负责设备发现、连接、断开和消息传输。
+/// </summary>
+public class MidiDeviceManager : IMidiDeviceManager
 {
     private readonly ConcurrentDictionary<string, MidiDevice> _devices = new();
     private readonly ConcurrentDictionary<int, MidiIn> _localInputs = new();
@@ -38,7 +42,10 @@ public class MidiDeviceManager : IDisposable
     public ObservableCollection<MidiDevice> InputDevices { get; } = new();
     public ObservableCollection<MidiDevice> OutputDevices { get; } = new();
     public ObservableCollection<NetworkMidi2Protocol.DiscoveredDevice> DiscoveredNM2Devices { get; } = new();
+    
+    IMidiRouter IMidiDeviceManager.Router => _router;
     public MidiRouter Router => _router;
+    
     public bool IsRunning => _isRunning;
 
     public int RtpPort

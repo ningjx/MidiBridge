@@ -1,11 +1,33 @@
 using System.Net;
 using System.Net.Sockets;
+using MidiBridge.Services.Interfaces;
 using Serilog;
 
 namespace MidiBridge.Services;
 
-public static class PortChecker
+/// <summary>
+/// 端口检查器实现，用于检测端口是否被占用。
+/// </summary>
+public class PortChecker : IPortChecker
 {
+    /// <inheritdoc/>
+    public bool IsPortOccupied(int port)
+    {
+        return !IsPortAvailable(port);
+    }
+
+    /// <inheritdoc/>
+    (bool RtpAvailable, bool Nm2Available, string? RtpError, string? Nm2Error) IPortChecker.CheckPorts(int rtpPort, int nm2Port)
+    {
+        var result = CheckPorts(rtpPort, nm2Port);
+        return (result.RtpAvailable, result.NM2Available, 
+            string.IsNullOrEmpty(result.RtpError) ? null : result.RtpError,
+            string.IsNullOrEmpty(result.NM2Error) ? null : result.NM2Error);
+    }
+
+    /// <summary>
+    /// 检查端口是否可用（静态方法）。
+    /// </summary>
     public static bool IsPortAvailable(int port)
     {
         try
@@ -21,6 +43,9 @@ public static class PortChecker
         }
     }
 
+    /// <summary>
+    /// 检查 RTP 和 NM2 端口状态（静态方法）。
+    /// </summary>
     public static (bool RtpAvailable, bool NM2Available, string RtpError, string NM2Error) CheckPorts(int rtpPort, int nm2Port)
     {
         bool rtpAvailable = IsPortAvailable(rtpPort);

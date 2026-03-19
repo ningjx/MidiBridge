@@ -5,11 +5,15 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using MidiBridge.Models;
+using MidiBridge.Services.Interfaces;
 using Serilog;
 
 namespace MidiBridge.Services.NetworkMidi2;
 
-public class NetworkMidi2Service : IDisposable
+/// <summary>
+/// Network MIDI 2.0 服务实现，负责 MIDI 2.0 网络协议的处理。
+/// </summary>
+public class NetworkMidi2Service : INetworkMidi2Service
 {
     private UdpClient? _udpServer;
     private CancellationTokenSource? _cts;
