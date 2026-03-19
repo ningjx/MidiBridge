@@ -66,6 +66,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
             Task.Run(() => ReceiveLoop(_cts.Token));
             Task.Run(() => PingLoop(_cts.Token));
             Task.Run(() => SessionTimeoutCheckLoop(_cts.Token));
+            Task.Run(() => IdlePeriodLoop(_cts.Token));
 
             OnStatusChanged($"Network MIDI 2.0 服务已启动: 端口 {port}");
             Log.Information("[NM2] 服务启动成功: 端口 {Port}", port);
@@ -371,22 +372,80 @@ public class NetworkMidi2Service : INetworkMidi2Service
         if (sequenceNumber == expectedSeq)
         {
             session.ReceiveSequence = sequenceNumber;
+            session.MissingSequences?.Remove(sequenceNumber);
+            session.RetransmitRetryCount = 0;
         }
         else if (sequenceNumber == session.ReceiveSequence)
         {
             session.PacketsDuplicate++;
-            Log.Debug("[NM2] 重复包: Seq={Seq}", sequenceNumber);
+            Log.Debug("[NM2] 重复包 (FEC): Seq={Seq}", sequenceNumber);
         }
         else if (IsSequenceNewer(sequenceNumber, session.ReceiveSequence))
         {
             int lost = CountPacketsLost(session.ReceiveSequence, sequenceNumber);
+
+            string sId = session.Id;
+            for (int i = 1; i <= lost; i++)
+            {
+                ushort missingSeq = (ushort)(session.ReceiveSequence + i);
+                session.MissingSequences ??= new List<ushort>();
+                if (!session.MissingSequences.Contains(missingSeq))
+                {
+                    session.MissingSequences.Add(missingSeq);
+                    Log.Debug("[NM2] 检测到丢包: Seq={Seq}", missingSeq);
+
+                    ushort capturedSeq = missingSeq;
+                    _ = Task.Run(async () =>
+                    {
+                        await Task.Delay(NetworkMidi2Protocol.RETRANSMIT_DELAY_MS);
+                        if (_sessions.TryGetValue(sId, out var s) && s.MissingSequences?.Contains(capturedSeq) == true)
+                        {
+                            RequestRetransmitInternal(sId, capturedSeq);
+                        }
+                    });
+                }
+            }
+
             session.PacketsLost += lost;
             session.ReceiveSequence = sequenceNumber;
             Log.Warning("[NM2] 丢包: 期望 {Expected}, 收到 {Actual}, 丢失 {Lost}", expectedSeq, sequenceNumber, lost);
         }
+        else if (IsSequenceNewer(sequenceNumber, (ushort)(session.ReceiveSequence - NetworkMidi2Protocol.FEC_REDUNDANCY - 1)))
+        {
+            session.PacketsRecovered++;
+            Log.Debug("[NM2] FEC 恢复: Seq={Seq}", sequenceNumber);
+        }
         else
         {
             session.PacketsDuplicate++;
+        }
+    }
+
+    private void RequestRetransmitInternal(string sessionId, ushort missingSeq)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session)) return;
+        if (session.State != NetworkMidi2Protocol.SessionState.Established) return;
+        if (session.RetransmitRetryCount >= NetworkMidi2Protocol.RETRANSMIT_MAX_RETRY)
+        {
+            Log.Warning("[NM2] 重传请求达到最大重试次数: Seq={Seq}", missingSeq);
+            return;
+        }
+
+        try
+        {
+            var ep = new IPEndPoint(IPAddress.Parse(session.RemoteHost), session.RemotePort);
+            var request = NetworkMidi2Protocol.CreateRetransmitRequestCommand(missingSeq, 1);
+            SendPacket(NetworkMidi2Protocol.CreateUDPPacket(request), ep);
+
+            session.LastRetransmitRequest = DateTime.Now;
+            session.RetransmitRetryCount++;
+            _sessions[sessionId] = session;
+
+            Log.Debug("[NM2] 自动发送重传请求: Seq={Seq}", missingSeq);
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "[NM2] 重传请求发送失败");
         }
     }
 
@@ -405,6 +464,12 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
     private void ProcessUMPData(byte[] umpData, NetworkMidi2Protocol.SessionInfo session)
     {
+        if (umpData == null || umpData.Length == 0)
+        {
+            Log.Debug("[NM2] 收到 Zero Length UMP Data");
+            return;
+        }
+
         if (umpData.Length < 4) return;
 
         string stableId = GetStableDeviceId(session.RemoteName, session.RemoteHost);
@@ -656,15 +721,59 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
         session.SendSequence++;
         session.PacketsSent++;
-        _sessions[sessionId] = session;
+        session.LastDataSent = DateTime.Now;
+        session.IsIdle = false;
+        session.IdleIntervalMs = NetworkMidi2Protocol.IDLE_FIRST_INTERVAL_MS;
 
         var cmd = NetworkMidi2Protocol.CreateUMPDataCommand(session.SendSequence, umpData);
 
         UpdateRetransmitBuffer(session, cmd);
 
-        SendPacket(NetworkMidi2Protocol.CreateUDPPacket(cmd), ep);
+        var fecPackets = BuildFEPackets(session, cmd);
+        SendPacket(NetworkMidi2Protocol.CreateUDPPacket(fecPackets), ep);
 
+        _sessions[sessionId] = session;
         UpdateDeviceTransmit(session);
+    }
+
+    private byte[][] BuildFEPackets(NetworkMidi2Protocol.SessionInfo session, byte[] currentCmd)
+    {
+        var packets = new List<byte[]>();
+
+        int fecCount = Math.Min(NetworkMidi2Protocol.FEC_REDUNDANCY, session.RetransmitBuffer.Count - 1);
+        for (int i = fecCount; i >= 1; i--)
+        {
+            int index = session.RetransmitBuffer.Count - 1 - i;
+            if (index >= 0 && index < session.RetransmitBuffer.Count)
+            {
+                packets.Add(session.RetransmitBuffer[index]);
+            }
+        }
+
+        packets.Add(currentCmd);
+
+        return packets.ToArray();
+    }
+
+    private void SendZeroLengthData(NetworkMidi2Protocol.SessionInfo session)
+    {
+        if (session.State != NetworkMidi2Protocol.SessionState.Established) return;
+
+        var ep = new IPEndPoint(IPAddress.Parse(session.RemoteHost), session.RemotePort);
+
+        session.SendSequence++;
+        session.LastDataSent = DateTime.Now;
+
+        var cmd = NetworkMidi2Protocol.CreateUMPDataCommand(session.SendSequence, Array.Empty<byte>());
+
+        UpdateRetransmitBuffer(session, cmd);
+
+        var fecPackets = BuildFEPackets(session, cmd);
+        SendPacket(NetworkMidi2Protocol.CreateUDPPacket(fecPackets), ep);
+
+        _sessions[session.Id] = session;
+
+        Log.Debug("[NM2] 发送 Zero Length Data: Seq={Seq}", session.SendSequence);
     }
 
     private void UpdateRetransmitBuffer(NetworkMidi2Protocol.SessionInfo session, byte[] cmd)
@@ -672,8 +781,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
         session.RetransmitBuffer ??= new List<byte[]>();
         session.RetransmitBuffer.Add(cmd);
 
-        const int MAX_RETRANSMIT_BUFFER = 64;
-        while (session.RetransmitBuffer.Count > MAX_RETRANSMIT_BUFFER)
+        while (session.RetransmitBuffer.Count > NetworkMidi2Protocol.RETRANSMIT_BUFFER_SIZE)
         {
             session.RetransmitBuffer.RemoveAt(0);
         }
@@ -814,6 +922,75 @@ public class NetworkMidi2Service : INetworkMidi2Service
             catch (ObjectDisposedException) { break; }
             catch { break; }
             }
+    }
+
+    private async void IdlePeriodLoop(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(100, ct);
+
+                var now = DateTime.Now;
+
+                foreach (var kvp in _sessions.ToList())
+                {
+                    var session = kvp.Value;
+                    if (session.State != NetworkMidi2Protocol.SessionState.Established) continue;
+
+                    var idleMs = (now - session.LastDataSent).TotalMilliseconds;
+
+                    if (idleMs >= session.IdleIntervalMs)
+                    {
+                        SendZeroLengthData(session);
+
+                        session.IdleIntervalMs = Math.Min(
+                            session.IdleIntervalMs * 2,
+                            NetworkMidi2Protocol.IDLE_MAX_INTERVAL_MS);
+
+                        _sessions[kvp.Key] = session;
+                    }
+                }
+            }
+            catch (OperationCanceledException) { break; }
+            catch (ObjectDisposedException) { break; }
+            catch { break; }
+        }
+    }
+
+    private async void RequestRetransmit(string sessionId, ushort missingSeq)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session)) return;
+        if (session.State != NetworkMidi2Protocol.SessionState.Established) return;
+
+        var ep = new IPEndPoint(IPAddress.Parse(session.RemoteHost), session.RemotePort);
+
+        session.MissingSequences ??= new List<ushort>();
+        if (session.MissingSequences.Contains(missingSeq)) return;
+
+        session.MissingSequences.Add(missingSeq);
+        _sessions[sessionId] = session;
+
+        await Task.Delay(NetworkMidi2Protocol.RETRANSMIT_DELAY_MS);
+
+        if (!_sessions.TryGetValue(sessionId, out var currentSession)) return;
+
+        if (currentSession.ReceiveSequence >= missingSeq)
+        {
+            currentSession.MissingSequences?.Remove(missingSeq);
+            _sessions[sessionId] = currentSession;
+            return;
+        }
+
+        var request = NetworkMidi2Protocol.CreateRetransmitRequestCommand(missingSeq, 1);
+        SendPacket(NetworkMidi2Protocol.CreateUDPPacket(request), ep);
+
+        currentSession.LastRetransmitRequest = DateTime.Now;
+        currentSession.RetransmitRetryCount++;
+        _sessions[sessionId] = currentSession;
+
+        Log.Debug("[NM2] 发送重传请求: Seq={Seq}, Retry={Retry}", missingSeq, currentSession.RetransmitRetryCount);
     }
 
     private static string GetSessionId(IPEndPoint ep)

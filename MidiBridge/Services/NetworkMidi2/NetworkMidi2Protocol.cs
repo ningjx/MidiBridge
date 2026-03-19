@@ -16,6 +16,13 @@ public static class NetworkMidi2Protocol
     public const int PING_INTERVAL_MS = 5000;
     public const int PING_TIMEOUT_COUNT = 3;
 
+    public const int FEC_REDUNDANCY = 2;
+    public const int IDLE_FIRST_INTERVAL_MS = 300;
+    public const int IDLE_MAX_INTERVAL_MS = 5000;
+    public const int RETRANSMIT_DELAY_MS = 10;
+    public const int RETRANSMIT_MAX_RETRY = 5;
+    public const int RETRANSMIT_BUFFER_SIZE = 64;
+
     public enum CommandCode : byte
     {
         UMPData = 0xFF,
@@ -117,6 +124,13 @@ public static class NetworkMidi2Protocol
         public int PacketsLost;
         public int PacketsDuplicate;
         public int PacketsRecovered;
+
+        public DateTime LastDataSent;
+        public bool IsIdle;
+        public int IdleIntervalMs;
+        public List<ushort> MissingSequences;
+        public DateTime LastRetransmitRequest;
+        public int RetransmitRetryCount;
     }
 
     public class DiscoveredDevice
