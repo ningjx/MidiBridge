@@ -617,9 +617,9 @@ public static class NetworkMidi2Protocol
 
     public static byte[] CreateRetransmitRequestCommand(ushort sequenceNumber, ushort numberOfCommands = 0)
     {
-        var packet = new byte[12];
+        var packet = new byte[8];
         packet[0] = (byte)CommandCode.RetransmitRequest;
-        packet[1] = 2;
+        packet[1] = 1;
         packet[2] = (byte)((sequenceNumber >> 8) & 0xFF);
         packet[3] = (byte)(sequenceNumber & 0xFF);
         packet[4] = (byte)((numberOfCommands >> 8) & 0xFF);
@@ -631,9 +631,9 @@ public static class NetworkMidi2Protocol
 
     public static byte[] CreateRetransmitErrorCommand(RetransmitErrorReason reason, ushort sequenceNumber)
     {
-        var packet = new byte[12];
+        var packet = new byte[8];
         packet[0] = (byte)CommandCode.RetransmitError;
-        packet[1] = 2;
+        packet[1] = 1;
         packet[2] = (byte)reason;
         packet[3] = 0;
         packet[4] = (byte)((sequenceNumber >> 8) & 0xFF);
@@ -737,7 +737,7 @@ public static class NetworkMidi2Protocol
         sequenceNumber = 0;
         numberOfCommands = 0;
 
-        if (payload == null || payload.Length < 8) return false;
+        if (payload == null || payload.Length < 4) return false;
 
         sequenceNumber = (ushort)((payload[0] << 8) | payload[1]);
         numberOfCommands = (ushort)((payload[2] << 8) | payload[3]);
