@@ -132,8 +132,11 @@ public class MainViewModel : ViewModelBase
     public MainViewModel()
     {
         var configService = new ConfigService();
+        var localMidiService = new LocalMidiService();
+        var rtpMidiService = new RtpMidiService();
+        
         _configService = configService;
-        _deviceManager = new MidiDeviceManager(configService);
+        _deviceManager = new MidiDeviceManager(configService, localMidiService, rtpMidiService);
         _router = ((MidiDeviceManager)_deviceManager).Router;
         
         _rtpPort = _configService.Config.Network.RtpPort;

@@ -22,11 +22,14 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IConfigService, ConfigService>();
         services.AddSingleton<IPortChecker, PortChecker>();
 
-        // MIDI 服务
-        // 注意：MidiDeviceManager 内部创建 MidiRouter，所以不单独注册 MidiRouter
-        services.AddSingleton<IMidiDeviceManager, MidiDeviceManager>();
+        // MIDI 子系统服务
+        services.AddSingleton<ILocalMidiService, LocalMidiService>();
+        services.AddSingleton<IRtpMidiService, RtpMidiService>();
         services.AddSingleton<INetworkMidi2Service, NetworkMidi2Service>();
         services.AddSingleton<IMdnsDiscoveryService, MdnsDiscoveryService>();
+
+        // MIDI 协调器
+        services.AddSingleton<IMidiDeviceManager, MidiDeviceManager>();
 
         // ViewModel
         services.AddSingleton<MainViewModel>();
