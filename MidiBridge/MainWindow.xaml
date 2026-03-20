@@ -688,6 +688,10 @@
                       TextWrapping="Wrap" IsHitTestVisible="False"
                       Panel.ZIndex="-1"/>
             
+            <Border Grid.Column="1" Background="Transparent"
+                    MouseLeftButtonDown="EmptyArea_Click"
+                    Panel.ZIndex="1"/>
+            
             <Border Grid.Column="1" Background="#252525" CornerRadius="8" Padding="12"
                     VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,10"
                     Visibility="{Binding ShowNM2DevicesPanel, Converter={StaticResource BoolToVis}}"

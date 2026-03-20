@@ -353,6 +353,21 @@ public class MainViewModel : ViewModelBase
         StatusMessage = "本地设备扫描完成";
     }
 
+    public void ClearSelection()
+    {
+        if (_selectedInputDevice != null)
+        {
+            _selectedInputDevice.IsSelected = false;
+            _selectedInputDevice = null;
+        }
+        if (_selectedOutputDevice != null)
+        {
+            _selectedOutputDevice.IsSelected = false;
+            _selectedOutputDevice = null;
+        }
+        StatusMessage = "已取消选择";
+    }
+
     private void ToggleNetwork()
     {
         if (_deviceManager.IsRunning)
@@ -441,20 +456,6 @@ public class MainViewModel : ViewModelBase
         _router.ClearAllRoutes();
         StatusMessage = "已清除所有路由";
         OnPropertyChanged(nameof(Routes));
-    }
-
-    private void ClearSelection()
-    {
-        if (_selectedInputDevice != null)
-        {
-            _selectedInputDevice.IsSelected = false;
-            _selectedInputDevice = null;
-        }
-        if (_selectedOutputDevice != null)
-        {
-            _selectedOutputDevice.IsSelected = false;
-            _selectedOutputDevice = null;
-        }
     }
 
     private bool HasConnectedOutput()

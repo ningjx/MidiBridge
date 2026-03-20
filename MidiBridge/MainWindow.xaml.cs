@@ -829,4 +829,11 @@ protected override void OnMouseUp(MouseButtonEventArgs e)
             }
         }
     }
+
+    private void EmptyArea_Click(object sender, MouseButtonEventArgs e)
+    {
+        VM.ClearSelection();
+        DrawConnections();
+        e.Handled = true;
+    }
 }
