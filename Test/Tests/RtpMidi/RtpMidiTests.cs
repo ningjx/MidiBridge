@@ -499,8 +499,15 @@ public class RtpMidiTestClient : IDisposable
         _cts?.Cancel();
         _controlClient?.Close();
         _dataClient?.Close();
+        _controlClient?.Dispose();
+        _dataClient?.Dispose();
+        _controlClient = null;
+        _dataClient = null;
+        _cts?.Dispose();
+        _cts = null;
         _remoteControlEP = null;
         _remoteDataEP = null;
+        _remoteSSRC = 0;
         OnLog?.Invoke("已断开连接");
     }
 
