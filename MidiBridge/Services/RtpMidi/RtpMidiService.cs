@@ -576,6 +576,7 @@ public class RtpMidiService : IRtpMidiService
             _deviceLastActivity[device.Id] = DateTime.Now;
             device.LastActivity = DateTime.Now;
             DeviceUpdated?.Invoke(this, device);
+            Log.Debug("[RTP] 收到 CK from {RemoteEP}", remoteEP);
         }
 
         SendSyncResponse(data, remoteEP, isDataPort);
@@ -672,7 +673,9 @@ public class RtpMidiService : IRtpMidiService
             if (BitConverter.IsLittleEndian) Array.Reverse(count);
             Buffer.BlockCopy(count, 0, packet, 8, 4);
 
-            _controlServer?.Send(packet, packet.Length, new IPEndPoint(endpoint.Address, endpoint.Port - 1));
+            var controlEP = new IPEndPoint(endpoint.Address, endpoint.Port - 1);
+            _controlServer?.Send(packet, packet.Length, controlEP);
+            Log.Debug("[RTP] 发送 CK 到 {RemoteEP}", controlEP);
         }
         catch { }
     }
@@ -697,6 +700,7 @@ public class RtpMidiService : IRtpMidiService
             Buffer.BlockCopy(nameBytes, 0, packet, 16, nameBytes.Length);
 
             _controlServer?.Send(packet, packet.Length, remoteEP);
+            Log.Debug("[RTP] 发送 OK 到 {RemoteEP}", remoteEP);
         }
         catch (Exception ex)
         {
@@ -704,7 +708,7 @@ public class RtpMidiService : IRtpMidiService
         }
     }
 
-    private void SendSyncResponse(byte[] data, IPEndPoint remoteEP, bool isDataPort = false)
+private void SendSyncResponse(byte[] data, IPEndPoint remoteEP, bool isDataPort = false)
     {
         try
         {
@@ -719,10 +723,15 @@ public class RtpMidiService : IRtpMidiService
             if (BitConverter.IsLittleEndian) Array.Reverse(count);
             Buffer.BlockCopy(count, 0, packet, 8, 4);
 
-            if (isDataPort)
-                _dataServer?.Send(packet, packet.Length, remoteEP);
-            else
-                _controlServer?.Send(packet, packet.Length, remoteEP);
+            if (isDataPort && _dataServer != null)
+            {
+                _dataServer.Send(packet, packet.Length, remoteEP);
+            }
+            else if (_controlServer != null)
+            {
+                _controlServer.Send(packet, packet.Length, remoteEP);
+            }
+            Log.Debug("[RTP] 发送 CK Reply 到 {RemoteEP}", remoteEP);
         }
         catch { }
     }

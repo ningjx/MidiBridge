@@ -463,13 +463,17 @@ public class RtpMidiTestClient : IDisposable
             Task.Run(() => TimeoutCheckLoop(_cts.Token));
 
             SendInvitation(name);
-            OnLog?.Invoke($"发送 INV 到 {host}:{controlPort}");
+            OnLog?.Invoke($"发送 INV 到 {host}:{controlPort}，等待响应...");
 
-            await Task.Delay(500);
+            for (int i = 0; i < 10; i++)
+            {
+                await Task.Delay(200);
+                if (_remoteSSRC != 0) break;
+            }
 
             if (_remoteSSRC == 0)
             {
-                OnLog?.Invoke("未收到 OK 响应");
+                OnLog?.Invoke("未收到 OK 响应（等待 2 秒）");
                 return false;
             }
 
@@ -504,9 +508,14 @@ public class RtpMidiTestClient : IDisposable
             try
             {
                 var result = await _controlClient.ReceiveAsync();
+                OnLog?.Invoke($"[控制] 收到 {result.Buffer.Length} 字节 from {result.RemoteEndPoint}");
                 ProcessControlPacket(result.Buffer, result.RemoteEndPoint);
             }
-            catch { break; }
+            catch (Exception ex) 
+            {
+                OnLog?.Invoke($"ControlLoop 异常: {ex.Message}");
+                break;
+            }
         }
     }
 
@@ -519,7 +528,11 @@ public class RtpMidiTestClient : IDisposable
                 var result = await _dataClient.ReceiveAsync();
                 ProcessDataPacket(result.Buffer, result.RemoteEndPoint);
             }
-            catch { break; }
+            catch (Exception ex)
+            {
+                OnLog?.Invoke($"DataLoop 异常: {ex.Message}");
+                break;
+            }
         }
     }
 
