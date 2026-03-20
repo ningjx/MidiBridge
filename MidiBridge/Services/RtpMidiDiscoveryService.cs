@@ -256,7 +256,6 @@ public class RtpMidiDiscoveryService : IDisposable
     private string ReadName(byte[] data, ref int offset)
     {
         var sb = new StringBuilder();
-        bool jumped = false;
 
         while (offset < data.Length)
         {
@@ -269,7 +268,6 @@ public class RtpMidiDiscoveryService : IDisposable
                 if (offset >= data.Length) break;
                 int pointer = ((len & 0x3F) << 8) | data[offset++];
                 offset = pointer;
-                jumped = true;
                 continue;
             }
 

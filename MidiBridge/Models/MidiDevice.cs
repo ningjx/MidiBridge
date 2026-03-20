@@ -15,6 +15,7 @@ public enum MidiDeviceType
 public enum MidiDeviceStatus
 {
     Disconnected,
+    Connecting,
     Connected,
     Active,
     Error

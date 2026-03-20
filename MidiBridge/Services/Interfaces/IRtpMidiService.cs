@@ -43,6 +43,15 @@ public interface IRtpMidiService : IDisposable
     void SendMessage(MidiDevice device, byte[] data);
 
     /// <summary>
+    /// 主动连接到远程设备。
+    /// </summary>
+    /// <param name="host">目标主机地址。</param>
+    /// <param name="port">控制端口。</param>
+    /// <param name="name">本地名称。</param>
+    /// <returns>连接成功返回 true。</returns>
+    Task<bool> ConnectAsync(string host, int port, string name = "MidiBridge");
+
+    /// <summary>
     /// 设备添加事件。
     /// </summary>
     event EventHandler<MidiDevice>? DeviceAdded;

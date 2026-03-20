@@ -147,10 +147,6 @@ public class RecoveryJournal
                 if (midiData.Length >= 2)
                     UpdateProgramChange(channel, midiData[1], seqNum);
                 break;
-            case 0xD0:
-                if (midiData.Length >= 2)
-                    UpdateChannelAftertouch(channel, midiData[1], seqNum);
-                break;
             case 0xE0:
                 if (midiData.Length >= 3)
                     UpdatePitchWheel(channel, midiData[1], midiData[2], seqNum);
@@ -222,10 +218,6 @@ public class RecoveryJournal
         pc.Program = program;
         pc.ProgramValid = true;
         pc.SeqNum = seqNum;
-    }
-
-    private void UpdateChannelAftertouch(int channel, byte value, uint seqNum)
-    {
     }
 
     private void UpdatePitchWheel(int channel, byte lsb, byte msb, uint seqNum)
@@ -438,7 +430,6 @@ public class RecoveryJournalReceiver
 
     private readonly RecoveryJournal.ChannelState[] _channels = new RecoveryJournal.ChannelState[MAX_CHANNELS];
     private ushort _lastReceivedSeq;
-    private bool _initialized;
 
     public RecoveryJournalReceiver()
     {
@@ -451,7 +442,6 @@ public class RecoveryJournalReceiver
         if (midiData == null || midiData.Length < 2) return;
 
         _lastReceivedSeq = seqNum;
-        _initialized = true;
 
         byte status = midiData[0];
         int channel = status & 0x0F;
