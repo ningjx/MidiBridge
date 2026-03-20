@@ -28,6 +28,7 @@ public class RtpMidiService : IRtpMidiService
     private readonly ConcurrentDictionary<string, RecoveryJournalReceiver> _deviceReceivers = new();
     private readonly ConcurrentDictionary<string, ushort> _deviceExpectedSeq = new();
     private readonly ConcurrentDictionary<string, DateTime> _deviceLastMidiSent = new();
+    private readonly ConcurrentDictionary<string, uint> _deviceRemoteSSRC = new();
 
     private UdpClient? _controlServer;
     private UdpClient? _dataServer;
@@ -36,6 +37,7 @@ public class RtpMidiService : IRtpMidiService
     private int _controlPort = 5004;
     private uint _localSSRC;
     private uint _rtpTimestamp;
+    private long _startTimeTicks;
 
     private RtpMidiDiscoveryService? _discoveryService;
 
@@ -66,6 +68,7 @@ public class RtpMidiService : IRtpMidiService
         {
             _controlPort = controlPort;
             _cts = new CancellationTokenSource();
+            _startTimeTicks = DateTimeOffset.UtcNow.Ticks;
 
             _controlServer = new UdpClient(controlPort);
             _dataServer = new UdpClient(controlPort + 1);
@@ -142,6 +145,7 @@ public class RtpMidiService : IRtpMidiService
             _deviceReceivers.TryRemove(deviceId, out _);
             _deviceExpectedSeq.TryRemove(deviceId, out _);
             _deviceLastMidiSent.TryRemove(deviceId, out _);
+            _deviceRemoteSSRC.TryRemove(deviceId, out _);
             DeviceRemoved?.Invoke(this, device);
         }
     }
@@ -175,6 +179,7 @@ public class RtpMidiService : IRtpMidiService
         _deviceReceivers.Clear();
         _deviceExpectedSeq.Clear();
         _deviceLastMidiSent.Clear();
+        _deviceRemoteSSRC.Clear();
 
         OnStatusChanged("RTP-MIDI 服务已停止");
     }
@@ -199,7 +204,7 @@ public class RtpMidiService : IRtpMidiService
             journal.UpdateFromMidiCommand(data, seq, timestamp);
 
             uint checkpointSeq = (uint)Math.Max(0, (int)seq - 10);
-            var recoveryJournalData = journal.Encode(checkpointSeq);
+            var recoveryJournalData = journal.Encode(checkpointSeq, timestamp);
 
             var packet = CreateRtpMidiPacket(seq, timestamp, _localSSRC, data, recoveryJournalData);
             _dataServer.Send(packet, packet.Length, endpoint);
@@ -218,7 +223,9 @@ public class RtpMidiService : IRtpMidiService
 
     private uint GetRtpTimestamp()
     {
-        return (uint)((DateTimeOffset.UtcNow.Ticks / TimeSpan.TicksPerSecond) * SAMPLE_RATE);
+        long elapsedTicks = DateTimeOffset.UtcNow.Ticks - _startTimeTicks;
+        double elapsedSeconds = elapsedTicks / (double)TimeSpan.TicksPerSecond;
+        return (uint)(elapsedSeconds * SAMPLE_RATE);
     }
 
     private async void ControlLoop(CancellationToken ct)
@@ -320,6 +327,7 @@ public class RtpMidiService : IRtpMidiService
                         _deviceReceivers.TryRemove(deviceId, out _);
                         _deviceExpectedSeq.TryRemove(deviceId, out _);
                         _deviceLastMidiSent.TryRemove(deviceId, out _);
+                        _deviceRemoteSSRC.TryRemove(deviceId, out _);
                         DeviceRemoved?.Invoke(this, device);
                         Log.Warning("[RTP] 设备超时断开: {Name}", device.Name);
                     }
@@ -377,7 +385,7 @@ public class RtpMidiService : IRtpMidiService
 
             uint timestamp = GetRtpTimestamp();
             uint checkpointSeq = (uint)Math.Max(0, (int)seq - 10);
-            var recoveryJournalData = journal.Encode(checkpointSeq);
+            var recoveryJournalData = journal.Encode(checkpointSeq, timestamp);
 
             var packet = CreateRtpMidiPacket(seq, timestamp, _localSSRC, Array.Empty<byte>(), recoveryJournalData);
             _dataServer.Send(packet, packet.Length, endpoint);
@@ -434,6 +442,8 @@ public class RtpMidiService : IRtpMidiService
     {
         if (data.Length < 16) return;
 
+        uint initiatorSSRC = ((uint)data[4] << 24) | ((uint)data[5] << 16) | ((uint)data[6] << 8) | data[7];
+        
         int nameLength = (data[12] << 8) | data[13];
         string name = nameLength > 0 && data.Length >= 16 + nameLength
             ? Encoding.ASCII.GetString(data, 16, nameLength)
@@ -462,9 +472,10 @@ public class RtpMidiService : IRtpMidiService
         _deviceReceivers[deviceId] = new RecoveryJournalReceiver();
         _deviceExpectedSeq[deviceId] = 0;
         _deviceLastMidiSent[deviceId] = DateTime.MinValue;
+        _deviceRemoteSSRC[deviceId] = initiatorSSRC;
 
         DeviceAdded?.Invoke(this, device);
-        SendInvitationAccept(remoteEP);
+        SendInvitationAccept(remoteEP, initiatorSSRC);
 
         Log.Information("[RtpMidi] 设备连接: {Name} ({Host})", name, host);
     }
@@ -505,6 +516,7 @@ public class RtpMidiService : IRtpMidiService
             _deviceReceivers.TryRemove(device.Id, out _);
             _deviceExpectedSeq.TryRemove(device.Id, out _);
             _deviceLastMidiSent.TryRemove(device.Id, out _);
+            _deviceRemoteSSRC.TryRemove(device.Id, out _);
             DeviceRemoved?.Invoke(this, device);
         }
     }
@@ -552,7 +564,7 @@ public class RtpMidiService : IRtpMidiService
 
         ushort seqNum = (ushort)((data[2] << 8) | data[3]);
 
-        if (seqNum != expectedSeq)
+        if (seqNum != expectedSeq && bFlag)
         {
             Log.Debug("[RTP] 包丢失: 期望 {Expected}, 收到 {Received}", expectedSeq, seqNum);
 
@@ -614,7 +626,7 @@ public class RtpMidiService : IRtpMidiService
         }
     }
 
-    private void SendInvitationAccept(IPEndPoint remoteEP)
+    private void SendInvitationAccept(IPEndPoint remoteEP, uint initiatorSSRC)
     {
         try
         {
@@ -627,7 +639,7 @@ public class RtpMidiService : IRtpMidiService
             packet[3] = (byte)'K';
 
             WriteBigEndianUInt32(packet, 4, 2);
-            WriteBigEndianUInt32(packet, 8, _localSSRC);
+            WriteBigEndianUInt32(packet, 8, initiatorSSRC);
             packet[12] = (byte)((nameBytes.Length >> 8) & 0xFF);
             packet[13] = (byte)(nameBytes.Length & 0xFF);
 
@@ -673,8 +685,9 @@ public class RtpMidiService : IRtpMidiService
 
     private byte[] CreateRtpMidiPacket(ushort sequenceNumber, uint timestamp, uint ssrc, byte[] midiData, byte[]? recoveryJournal = null)
     {
+        bool hasJournal = recoveryJournal != null && recoveryJournal.Length > 0;
         int midiListLen = CalculateMidiListLength(midiData);
-        int journalLen = recoveryJournal?.Length ?? 0;
+        int journalLen = hasJournal ? recoveryJournal!.Length : 0;
         int packetLen = 12 + midiListLen + journalLen;
         var packet = new byte[packetLen];
 
@@ -691,11 +704,11 @@ public class RtpMidiService : IRtpMidiService
         WriteBigEndianUInt32(packet, offset, ssrc);
         offset += 4;
 
-        offset = WriteMidiCommandSection(packet, offset, midiData);
+        offset = WriteMidiCommandSection(packet, offset, midiData, hasJournal);
 
-        if (recoveryJournal != null && recoveryJournal.Length > 0)
+        if (hasJournal)
         {
-            Buffer.BlockCopy(recoveryJournal, 0, packet, offset, recoveryJournal.Length);
+            Buffer.BlockCopy(recoveryJournal!, 0, packet, offset, recoveryJournal!.Length);
         }
 
         return packet;
@@ -709,19 +722,21 @@ public class RtpMidiService : IRtpMidiService
         return len;
     }
 
-    private int WriteMidiCommandSection(byte[] packet, int offset, byte[] midiData)
+    private int WriteMidiCommandSection(byte[] packet, int offset, byte[] midiData, bool hasJournal)
     {
         byte header = 0;
 
+        if (hasJournal)
+            header |= 0x80;
+
         if (midiData == null || midiData.Length == 0)
         {
-            header = 0x00;
             packet[offset++] = header;
             return offset;
         }
 
         int len = Math.Min(midiData.Length, 15);
-        header = (byte)len;
+        header |= (byte)len;
 
         packet[offset++] = header;
 

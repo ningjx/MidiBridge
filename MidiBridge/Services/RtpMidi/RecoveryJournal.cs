@@ -1,5 +1,4 @@
 using System.IO;
-using System.Text;
 
 namespace MidiBridge.Services.RtpMidi;
 
@@ -35,14 +34,20 @@ public class RecoveryJournal
         public byte[] Values { get; } = new byte[MAX_CONTROLLERS];
         public byte[] Toggle { get; } = new byte[MAX_CONTROLLERS];
         public byte[] Count { get; } = new byte[MAX_CONTROLLERS];
+        public byte[] ToolType { get; } = new byte[MAX_CONTROLLERS];
         public uint[] SeqNums { get; } = new uint[MAX_CONTROLLERS];
         public uint ChapterSeqNum;
+
+        public const byte TOOL_VALUE = 0;
+        public const byte TOOL_TOGGLE = 1;
+        public const byte TOOL_COUNT = 2;
 
         public ChapterCState()
         {
             Array.Fill(Values, (byte)0);
             Array.Fill(Toggle, (byte)0);
             Array.Fill(Count, (byte)0);
+            Array.Fill(ToolType, (byte)0);
             Array.Fill(SeqNums, (uint)0);
         }
     }
@@ -58,6 +63,7 @@ public class RecoveryJournal
         public byte[] Velocities { get; } = new byte[MAX_NOTES];
         public uint[] NoteOnSeqNums { get; } = new uint[MAX_NOTES];
         public uint[] NoteOnTimestamps { get; } = new uint[MAX_NOTES];
+        public byte[] NoteOffBits { get; } = new byte[16];
         public uint ChapterSeqNum;
 
         public ChapterNState()
@@ -65,12 +71,38 @@ public class RecoveryJournal
             Array.Fill(Velocities, (byte)0);
             Array.Fill(NoteOnSeqNums, (uint)0);
             Array.Fill(NoteOnTimestamps, (uint)0);
+            Array.Fill(NoteOffBits, (byte)0);
+        }
+
+        public void SetNoteOffBit(int note)
+        {
+            if (note >= 0 && note < MAX_NOTES)
+            {
+                NoteOffBits[note / 8] |= (byte)(1 << (note % 8));
+            }
+        }
+
+        public void ClearNoteOffBit(int note)
+        {
+            if (note >= 0 && note < MAX_NOTES)
+            {
+                NoteOffBits[note / 8] &= (byte)~(1 << (note % 8));
+            }
+        }
+
+        public bool GetNoteOffBit(int note)
+        {
+            if (note >= 0 && note < MAX_NOTES)
+            {
+                return (NoteOffBits[note / 8] & (1 << (note % 8))) != 0;
+            }
+            return false;
         }
     }
 
     private readonly ChannelState[] _channels = new ChannelState[MAX_CHANNELS];
     private uint _journalSeqNum;
-    private uint _checkpointSeqNum;
+    private uint _currentTimestamp;
 
     public RecoveryJournal()
     {
@@ -83,6 +115,8 @@ public class RecoveryJournal
     public void UpdateFromMidiCommand(byte[] midiData, uint seqNum, uint timestamp)
     {
         if (midiData == null || midiData.Length < 2) return;
+
+        _currentTimestamp = timestamp;
 
         byte status = midiData[0];
         int channel = status & 0x0F;
@@ -113,6 +147,10 @@ public class RecoveryJournal
                 if (midiData.Length >= 2)
                     UpdateProgramChange(channel, midiData[1], seqNum);
                 break;
+            case 0xD0:
+                if (midiData.Length >= 2)
+                    UpdateChannelAftertouch(channel, midiData[1], seqNum);
+                break;
             case 0xE0:
                 if (midiData.Length >= 3)
                     UpdatePitchWheel(channel, midiData[1], midiData[2], seqNum);
@@ -128,12 +166,17 @@ public class RecoveryJournal
         notes.Velocities[note] = velocity;
         notes.NoteOnSeqNums[note] = seqNum;
         notes.NoteOnTimestamps[note] = timestamp;
+        notes.ClearNoteOffBit(note);
         notes.ChapterSeqNum = seqNum;
     }
 
     private void UpdateNoteOff(int channel, byte note, uint seqNum)
     {
         var notes = _channels[channel].Notes;
+        if (notes.Velocities[note] > 0)
+        {
+            notes.SetNoteOffBit(note);
+        }
         notes.Velocities[note] = 0;
         notes.ChapterSeqNum = seqNum;
     }
@@ -145,17 +188,31 @@ public class RecoveryJournal
         cc.SeqNums[controller] = seqNum;
         cc.ChapterSeqNum = seqNum;
 
-        if (controller == 0)
+        switch (controller)
         {
-            var pc = _channels[channel].ProgramChange;
-            pc.BankMsb = value;
-            pc.BankMsbValid = true;
-        }
-        else if (controller == 32)
-        {
-            var pc = _channels[channel].ProgramChange;
-            pc.BankLsb = value;
-            pc.BankLsbValid = true;
+            case 0:
+                _channels[channel].ProgramChange.BankMsb = value;
+                _channels[channel].ProgramChange.BankMsbValid = true;
+                break;
+            case 32:
+                _channels[channel].ProgramChange.BankLsb = value;
+                _channels[channel].ProgramChange.BankLsbValid = true;
+                break;
+            case 64:
+            case 66:
+            case 67:
+            case 69:
+                cc.ToolType[controller] = ChapterCState.TOOL_TOGGLE;
+                cc.Toggle[controller] = (byte)(value >= 64 ? 1 : 0);
+                break;
+            case 65:
+            case 68:
+                cc.ToolType[controller] = ChapterCState.TOOL_COUNT;
+                cc.Count[controller] = (byte)(value >= 64 ? 1 : 0);
+                break;
+            default:
+                cc.ToolType[controller] = ChapterCState.TOOL_VALUE;
+                break;
         }
     }
 
@@ -167,6 +224,10 @@ public class RecoveryJournal
         pc.SeqNum = seqNum;
     }
 
+    private void UpdateChannelAftertouch(int channel, byte value, uint seqNum)
+    {
+    }
+
     private void UpdatePitchWheel(int channel, byte lsb, byte msb, uint seqNum)
     {
         var pw = _channels[channel].PitchWheel;
@@ -174,27 +235,28 @@ public class RecoveryJournal
         pw.SeqNum = seqNum;
     }
 
-    public byte[] Encode(uint checkpointSeqNum, bool singlePacketLoss = false)
+    public byte[] Encode(uint checkpointSeqNum, uint currentRtpTimestamp, bool singlePacketLoss = false)
     {
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms);
 
-        byte header = 0x40;
         int activeChannels = 0;
         foreach (var ch in _channels)
         {
-            if (ch.LastUpdateSeqNum > 0) activeChannels++;
+            if (ch.LastUpdateSeqNum > checkpointSeqNum) activeChannels++;
         }
 
         if (activeChannels == 0)
         {
-            header |= 0x80;
-            writer.Write(header);
+            byte emptyHeader = 0x40;
+            emptyHeader |= 0x80;
+            writer.Write(emptyHeader);
             writer.Write((byte)0);
             writer.Write((byte)0);
             return ms.ToArray();
         }
 
+        byte header = 0x40;
         int totchan = Math.Min(activeChannels, 15);
         header |= (byte)(totchan << 4);
 
@@ -206,7 +268,7 @@ public class RecoveryJournal
         for (int ch = 0; ch < MAX_CHANNELS; ch++)
         {
             var channel = _channels[ch];
-            if (channel.LastUpdateSeqNum == 0) continue;
+            if (channel.LastUpdateSeqNum <= checkpointSeqNum) continue;
 
             byte cheader = 0;
             int chapters = 0;
@@ -231,11 +293,11 @@ public class RecoveryJournal
             if ((chapters & 0x01) != 0)
                 EncodeChapterP(writer, channel.ProgramChange, singlePacketLoss);
             if ((chapters & 0x02) != 0)
-                EncodeChapterC(writer, channel.ControlChange, singlePacketLoss);
+                EncodeChapterC(writer, channel.ControlChange, singlePacketLoss, checkpointSeqNum);
             if ((chapters & 0x04) != 0)
                 EncodeChapterW(writer, channel.PitchWheel, singlePacketLoss);
             if ((chapters & 0x08) != 0)
-                EncodeChapterN(writer, channel.Notes, singlePacketLoss, checkpointSeqNum);
+                EncodeChapterN(writer, channel.Notes, singlePacketLoss, checkpointSeqNum, currentRtpTimestamp);
         }
 
         return ms.ToArray();
@@ -252,22 +314,33 @@ public class RecoveryJournal
         if (pc.BankLsbValid) writer.Write(pc.BankLsb);
     }
 
-    private void EncodeChapterC(BinaryWriter writer, ChapterCState cc, bool singlePacketLoss)
+    private void EncodeChapterC(BinaryWriter writer, ChapterCState cc, bool singlePacketLoss, uint checkpointSeqNum)
     {
-        var logs = new List<(byte controller, byte value)>();
+        var logs = new List<(byte controller, byte toolType, byte value)>();
         for (int i = 0; i < MAX_CONTROLLERS; i++)
         {
             if (i == 0 || i == 32) continue;
-            if (cc.SeqNums[i] > 0) logs.Add(((byte)i, cc.Values[i]));
+            if (cc.SeqNums[i] > checkpointSeqNum)
+            {
+                byte value = cc.ToolType[i] switch
+                {
+                    ChapterCState.TOOL_TOGGLE => cc.Toggle[i],
+                    ChapterCState.TOOL_COUNT => cc.Count[i],
+                    _ => cc.Values[i]
+                };
+                logs.Add(((byte)i, cc.ToolType[i], value));
+            }
         }
 
         byte header = (byte)Math.Min(logs.Count, 127);
         if (singlePacketLoss) header |= 0x80;
         writer.Write(header);
 
-        foreach (var (controller, value) in logs)
+        foreach (var (controller, toolType, value) in logs)
         {
-            writer.Write(controller);
+            byte controllerByte = controller;
+            controllerByte |= (byte)(toolType << 5);
+            writer.Write(controllerByte);
             writer.Write(value);
         }
     }
@@ -281,22 +354,25 @@ public class RecoveryJournal
         writer.Write((byte)(pw.Value & 0x7F));
     }
 
-    private void EncodeChapterN(BinaryWriter writer, ChapterNState notes, bool singlePacketLoss, uint checkpointSeqNum)
+    private void EncodeChapterN(BinaryWriter writer, ChapterNState notes, bool singlePacketLoss, uint checkpointSeqNum, uint currentRtpTimestamp)
     {
-        var noteLogs = new List<(byte note, byte velocity, uint timestamp)>();
-        var offBits = new bool[MAX_NOTES];
+        var noteLogs = new List<(byte note, byte velocity, bool yBit)>();
 
         for (int i = 0; i < MAX_NOTES; i++)
         {
             if (notes.Velocities[i] > 0 && notes.NoteOnSeqNums[i] > checkpointSeqNum)
             {
-                noteLogs.Add(((byte)i, notes.Velocities[i], notes.NoteOnTimestamps[i]));
+                bool yBit = false;
+                if (notes.NoteOnTimestamps[i] > 0 && currentRtpTimestamp > notes.NoteOnTimestamps[i])
+                {
+                    uint diff = currentRtpTimestamp - notes.NoteOnTimestamps[i];
+                    yBit = diff < 4410;
+                }
+                noteLogs.Add(((byte)i, notes.Velocities[i], yBit));
             }
         }
 
-        int offBytes = (MAX_NOTES + 7) / 8;
-        byte[] offBitsData = new byte[offBytes];
-
+        int offBytes = 16;
         int headerLen = 2;
         int logsLen = noteLogs.Count * 2;
         int totalLen = headerLen + offBytes + logsLen;
@@ -313,12 +389,12 @@ public class RecoveryJournal
 
         writer.Write(high);
         writer.Write(low);
-        writer.Write(offBitsData);
+        writer.Write(notes.NoteOffBits);
 
-        foreach (var (note, velocity, timestamp) in noteLogs)
+        foreach (var (note, velocity, yBit) in noteLogs)
         {
             byte noteByte = note;
-            if (timestamp > 0) noteByte |= 0x80;
+            if (yBit) noteByte |= 0x80;
             writer.Write(noteByte);
             writer.Write(velocity);
         }
@@ -338,8 +414,11 @@ public class RecoveryJournal
             var notes = channel.Notes;
             for (int n = 0; n < MAX_NOTES; n++)
             {
-                if (notes.NoteOnSeqNums[n] <= receivedSeqNum)
+                if (notes.NoteOnSeqNums[n] <= receivedSeqNum && notes.Velocities[n] == 0)
+                {
                     notes.NoteOnSeqNums[n] = 0;
+                    notes.ClearNoteOffBit(n);
+                }
             }
 
             var cc = channel.ControlChange;
@@ -503,14 +582,25 @@ public class RecoveryJournalReceiver
         {
             if (singlePacketLoss && sbit) continue;
 
-            byte controller = data[offset++];
+            byte controllerByte = data[offset++];
             byte value = data[offset++];
 
+            byte controller = (byte)(controllerByte & 0x1F);
+            byte toolType = (byte)((controllerByte >> 5) & 0x03);
+
             var cc = _channels[channel].ControlChange;
-            if (cc.Values[controller] != value)
+            
+            byte actualValue = toolType switch
             {
-                commands.Add(new byte[] { (byte)(0xB0 | channel), controller, value });
-                cc.Values[controller] = value;
+                RecoveryJournal.ChapterCState.TOOL_TOGGLE => (byte)(value > 0 ? 127 : 0),
+                RecoveryJournal.ChapterCState.TOOL_COUNT => value,
+                _ => value
+            };
+
+            if (cc.Values[controller] != actualValue)
+            {
+                commands.Add(new byte[] { (byte)(0xB0 | channel), controller, actualValue });
+                cc.Values[controller] = actualValue;
             }
         }
 
@@ -576,12 +666,16 @@ public class RecoveryJournalReceiver
             byte velocity = data[offset++];
 
             int note = noteByte & 0x7F;
+            bool yBit = (noteByte & 0x80) != 0;
             var notes = _channels[channel].Notes;
 
             if (notes.Velocities[note] == 0)
             {
-                commands.Add(new byte[] { (byte)(0x90 | channel), (byte)note, velocity });
-                notes.Velocities[note] = velocity;
+                if (yBit)
+                {
+                    commands.Add(new byte[] { (byte)(0x90 | channel), (byte)note, velocity });
+                    notes.Velocities[note] = velocity;
+                }
             }
             else if (notes.Velocities[note] != velocity)
             {
