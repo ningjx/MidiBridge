@@ -329,11 +329,7 @@ public class MidiDeviceManager : IMidiDeviceManager
         device.IsEnabled = enabled;
         _configService.SetDeviceEnabled(deviceId, enabled);
 
-        if (!enabled && (device.Status == MidiDeviceStatus.Connected || device.Status == MidiDeviceStatus.Active))
-        {
-            DisconnectDevice(deviceId);
-        }
-        else if (enabled)
+        if (enabled)
         {
             _router.TryRestoreRoutesForDevice(device);
         }
