@@ -54,15 +54,15 @@ static async Task RtpMidiMenu()
     while (true)
     {
         Console.WriteLine("\n--- RTP-MIDI 协议 ---");
-        Console.WriteLine("1. 服务端测试");
-        Console.WriteLine("2. 钢琴键盘客户端");
+        Console.WriteLine("1. 服务端测试 (完整实现)");
+        Console.WriteLine("2. 客户端测试 (完整实现)");
         Console.WriteLine("0. 返回");
         Console.Write("\n请选择: ");
 
         switch (Console.ReadLine())
         {
             case "1": await RtpMidiTests.ServerTest(); break;
-            case "2": await RtpMidiTests.PianoTest(); break;
+            case "2": await RtpMidiTests.ClientTest(); break;
             case "0": return;
             default: Console.WriteLine("无效选择"); break;
         }
