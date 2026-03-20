@@ -11,8 +11,8 @@ namespace MidiBridge.Services.RtpMidi;
 
 public class RtpMidiService : IRtpMidiService
 {
-    private const int SYNC_INTERVAL_MS = 5000;
-    private const int DEVICE_TIMEOUT_MS = 15000;
+    private const int SYNC_INTERVAL_MS = 10000;
+    private const int DEVICE_TIMEOUT_MS = 60000;
     private const int DEVICE_CHECK_INTERVAL_MS = 2000;
     private const int GUARD_INTERVAL_MS = 1000;
     private const int SAMPLE_RATE = 44100;
