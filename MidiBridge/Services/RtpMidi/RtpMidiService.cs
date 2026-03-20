@@ -342,11 +342,19 @@ public class RtpMidiService : IRtpMidiService
             {
                 await Task.Delay(SYNC_INTERVAL_MS, ct);
 
-                foreach (var device in _devices.Values.ToList())
+                var deviceList = _devices.Values.ToList();
+                Log.Debug("[RTP] SyncLoop: {Count} 个设备", deviceList.Count);
+
+                foreach (var device in deviceList)
                 {
                     if (_deviceEndpoints.TryGetValue(device.Id, out var endpoint))
                     {
+                        Log.Debug("[RTP] SyncLoop: 发送 CK 到 {Name}", device.Name);
                         SendSyncPacket(endpoint);
+                    }
+                    else
+                    {
+                        Log.Debug("[RTP] SyncLoop: 设备 {Name} 没有端点", device.Name);
                     }
                 }
             }
@@ -501,7 +509,18 @@ public class RtpMidiService : IRtpMidiService
         string host = remoteEP.Address.ToString();
         string deviceId = $"rtp-{name}@{host}";
 
-        if (_devices.ContainsKey(deviceId)) return;
+        if (_devices.TryGetValue(deviceId, out var existingDevice))
+        {
+            _deviceEndpoints[deviceId] = new IPEndPoint(remoteEP.Address, remoteEP.Port + 1);
+            _deviceLastActivity[deviceId] = DateTime.Now;
+            _deviceRemoteSSRC[deviceId] = initiatorSSRC;
+            existingDevice.Status = MidiDeviceStatus.Connected;
+            existingDevice.LastActivity = DateTime.Now;
+            DeviceUpdated?.Invoke(this, existingDevice);
+            SendInvitationAccept(remoteEP, initiatorSSRC);
+            Log.Debug("[RTP] 设备重连: {Name} ({Host}:{Port})", name, host, remoteEP.Port);
+            return;
+        }
 
         var device = new MidiDevice
         {
