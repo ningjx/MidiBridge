@@ -443,34 +443,25 @@
                     <ItemsControl ItemsSource="{Binding InputDevices}" x:Name="InputItemsControl">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Grid Margin="3">
-                                <Border x:Name="GlowBorder" Background="Transparent" CornerRadius="8"
-                                        BorderThickness="0" Opacity="0"
-                                        IsHitTestVisible="False">
-                                    <Border.Effect>
-                                        <DropShadowEffect x:Name="GlowEffect" Color="#4A90D9" 
-                                                          BlurRadius="0" ShadowDepth="0" Opacity="0"/>
-                                    </Border.Effect>
-                                </Border>
-                                <Border x:Name="DeviceBorder" Background="{StaticResource ItemBg}" CornerRadius="6" Padding="12,10"
-                                        BorderThickness="1"
-                                        Tag="{Binding Id}" Cursor="Hand"
-                                        MouseLeftButtonDown="Device_MouseLeftButtonDown"
-                                        MouseMove="Device_MouseMove"
-                                        MouseRightButtonDown="Device_RightClick"
-                                        MouseEnter="Device_MouseEnter"
-                                        MouseLeave="Device_MouseLeave">
-                                    <Border.Style>
-                                        <Style TargetType="Border">
-                                            <Setter Property="BorderBrush" Value="#4A90D9"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsEnabled}" Value="False">
-                                                    <Setter Property="BorderBrush" Value="#3D3D3D"/>
-                                                    <Setter Property="Opacity" Value="0.5"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Border.Style>
+                            <Border x:Name="DeviceBorder" Background="{StaticResource ItemBg}" CornerRadius="6" Margin="3" Padding="12,10"
+                                    BorderThickness="1"
+                                    Tag="{Binding Id}" Cursor="Hand"
+                                    MouseLeftButtonDown="Device_MouseLeftButtonDown"
+                                    MouseMove="Device_MouseMove"
+                                    MouseRightButtonDown="Device_RightClick"
+                                    MouseEnter="Device_MouseEnter"
+                                    MouseLeave="Device_MouseLeave">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="BorderBrush" Value="#4A90D9"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsEnabled}" Value="False">
+                                                <Setter Property="BorderBrush" Value="#3D3D3D"/>
+                                                <Setter Property="Opacity" Value="0.5"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
                                     <Border.ContextMenu>
                                         <ContextMenu Style="{StaticResource ModernContextMenu}" Opened="ContextMenu_Opened">
                                             <MenuItem Header="禁用" Style="{StaticResource ModernMenuItem}"/>
@@ -491,11 +482,12 @@
                                         </StackPanel>
 
                                         <Grid Grid.Column="1" Width="24" Height="24">
-                                            <Ellipse x:Name="ConnectorGlow" Width="24" Height="24"
-                                                     Fill="Transparent" Stroke="Transparent" StrokeThickness="4"
-                                                     Opacity="0" IsHitTestVisible="False">
+                                            <Ellipse Width="22" Height="22"
+                                                      Fill="#4A90D9" Opacity="0"
+                                                      IsHitTestVisible="False"
+                                                      x:Name="ConnectorGlow">
                                                 <Ellipse.Effect>
-                                                    <DropShadowEffect Color="#4A90D9" BlurRadius="8" ShadowDepth="0" Opacity="0.6"/>
+                                                    <BlurEffect Radius="6"/>
                                                 </Ellipse.Effect>
                                             </Ellipse>
                                             <Ellipse Width="18" Height="18"
@@ -509,11 +501,6 @@
                                                     <Style TargetType="Ellipse">
                                                         <Setter Property="Stroke" Value="#666666"/>
                                                         <Setter Property="Fill" Value="#3A3A3A"/>
-                                                        <Setter Property="RenderTransform">
-                                                            <Setter.Value>
-                                                                <ScaleTransform CenterX="9" CenterY="9"/>
-                                                            </Setter.Value>
-                                                        </Setter>
                                                         <Style.Triggers>
                                                             <MultiDataTrigger>
                                                                 <MultiDataTrigger.Conditions>
@@ -530,7 +517,12 @@
                                                                     <Condition Binding="{Binding IsSelected}" Value="True"/>
                                                                 </MultiDataTrigger.Conditions>
                                                                 <Setter Property="Stroke" Value="Orange"/>
-                                                                <Setter Property="Fill" Value="Orange"/>
+                                                                <Setter Property="Fill" Value="#1A1A1A"/>
+                                                                <Setter Property="Effect">
+                                                                    <Setter.Value>
+                                                                        <DropShadowEffect Color="Orange" BlurRadius="12" ShadowDepth="0" Opacity="0.8"/>
+                                                                    </Setter.Value>
+                                                                </Setter>
                                                             </MultiDataTrigger>
                                                             <MultiDataTrigger>
                                                                 <MultiDataTrigger.Conditions>
@@ -561,10 +553,9 @@
                                         </Grid>
                                     </Grid>
                                 </Border>
-                            </Grid>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </ScrollViewer>
                 <Canvas x:Name="InputDropCanvas" Panel.ZIndex="0" IsHitTestVisible="False"/>
             </Grid>
@@ -574,51 +565,43 @@
                 <ItemsControl ItemsSource="{Binding OutputDevices}" x:Name="OutputItemsControl">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Grid Margin="3">
-                                <Border x:Name="GlowBorder" Background="Transparent" CornerRadius="8"
-                                        BorderThickness="0" Opacity="0"
-                                        IsHitTestVisible="False">
-                                    <Border.Effect>
-                                        <DropShadowEffect x:Name="GlowEffect" Color="#4A90D9" 
-                                                          BlurRadius="0" ShadowDepth="0" Opacity="0"/>
-                                    </Border.Effect>
-                                </Border>
-                                <Border x:Name="DeviceBorder" Background="{StaticResource ItemBg}" CornerRadius="6" Padding="12,10"
-                                        BorderThickness="1"
-                                        Tag="{Binding Id}" Cursor="Hand"
-                                        MouseLeftButtonDown="Device_MouseLeftButtonDown"
-                                        MouseMove="Device_MouseMove"
-                                        MouseRightButtonDown="Device_RightClick"
-                                        MouseEnter="Device_MouseEnter"
-                                        MouseLeave="Device_MouseLeave">
-                                    <Border.Style>
-                                        <Style TargetType="Border">
-                                            <Setter Property="BorderBrush" Value="#4A90D9"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsEnabled}" Value="False">
-                                                    <Setter Property="BorderBrush" Value="#3D3D3D"/>
-                                                    <Setter Property="Opacity" Value="0.5"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Border.Style>
-                                    <Border.ContextMenu>
-                                        <ContextMenu Style="{StaticResource ModernContextMenu}" Opened="ContextMenu_Opened">
-                                            <MenuItem Header="禁用" Style="{StaticResource ModernMenuItem}"/>
-                                        </ContextMenu>
-                                    </Border.ContextMenu>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
+                            <Border x:Name="DeviceBorder" Background="{StaticResource ItemBg}" CornerRadius="6" Margin="3" Padding="12,10"
+                                    BorderThickness="1"
+                                    Tag="{Binding Id}" Cursor="Hand"
+                                    MouseLeftButtonDown="Device_MouseLeftButtonDown"
+                                    MouseMove="Device_MouseMove"
+                                    MouseRightButtonDown="Device_RightClick"
+                                    MouseEnter="Device_MouseEnter"
+                                    MouseLeave="Device_MouseLeave">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="BorderBrush" Value="#4A90D9"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsEnabled}" Value="False">
+                                                <Setter Property="BorderBrush" Value="#3D3D3D"/>
+                                                <Setter Property="Opacity" Value="0.5"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <Border.ContextMenu>
+                                    <ContextMenu Style="{StaticResource ModernContextMenu}" Opened="ContextMenu_Opened">
+                                        <MenuItem Header="禁用" Style="{StaticResource ModernMenuItem}"/>
+                                    </ContextMenu>
+                                </Border.ContextMenu>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
 
                                         <Grid Grid.Column="0" Width="24" Height="24" Margin="0,0,10,0">
-                                            <Ellipse x:Name="ConnectorGlow" Width="24" Height="24"
-                                                     Fill="Transparent" Stroke="Transparent" StrokeThickness="4"
-                                                     Opacity="0" IsHitTestVisible="False">
+                                            <Ellipse Width="22" Height="22"
+                                                      Fill="#4A90D9" Opacity="0"
+                                                      IsHitTestVisible="False"
+                                                      x:Name="ConnectorGlow">
                                                 <Ellipse.Effect>
-                                                    <DropShadowEffect Color="#4A90D9" BlurRadius="8" ShadowDepth="0" Opacity="0.6"/>
+                                                    <BlurEffect Radius="6"/>
                                                 </Ellipse.Effect>
                                             </Ellipse>
                                             <Ellipse Width="18" Height="18"
@@ -632,11 +615,6 @@
                                                     <Style TargetType="Ellipse">
                                                         <Setter Property="Stroke" Value="#666666"/>
                                                         <Setter Property="Fill" Value="#3A3A3A"/>
-                                                        <Setter Property="RenderTransform">
-                                                            <Setter.Value>
-                                                                <ScaleTransform CenterX="9" CenterY="9"/>
-                                                            </Setter.Value>
-                                                        </Setter>
                                                         <Style.Triggers>
                                                             <MultiDataTrigger>
                                                                 <MultiDataTrigger.Conditions>
@@ -647,13 +625,18 @@
                                                                 <Setter Property="Stroke" Value="{StaticResource ConnectorNormal}"/>
                                                                 <Setter Property="Fill" Value="#1A1A1A"/>
                                                             </MultiDataTrigger>
-                                                            <MultiDataTrigger>
+<MultiDataTrigger>
                                                                 <MultiDataTrigger.Conditions>
                                                                     <Condition Binding="{Binding IsEnabled}" Value="True"/>
                                                                     <Condition Binding="{Binding IsSelected}" Value="True"/>
                                                                 </MultiDataTrigger.Conditions>
                                                                 <Setter Property="Stroke" Value="Orange"/>
-                                                                <Setter Property="Fill" Value="Orange"/>
+                                                                <Setter Property="Fill" Value="#1A1A1A"/>
+                                                                <Setter Property="Effect">
+                                                                    <Setter.Value>
+                                                                        <DropShadowEffect Color="Orange" BlurRadius="12" ShadowDepth="0" Opacity="0.8"/>
+                                                                    </Setter.Value>
+                                                                </Setter>
                                                             </MultiDataTrigger>
                                                             <MultiDataTrigger>
                                                                 <MultiDataTrigger.Conditions>
@@ -692,10 +675,9 @@
                                         </StackPanel>
                                     </Grid>
                                 </Border>
-                            </Grid>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </ScrollViewer>
                 <Canvas x:Name="OutputDropCanvas" Panel.ZIndex="0" IsHitTestVisible="False"/>
             </Grid>
@@ -717,14 +699,15 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
-                    <Grid Grid.Row="0" Margin="0,0,0,8">
+                    <Grid Grid.Row="0" Margin="0,0,0,6">
                         <TextBlock Text="发现的设备" FontWeight="SemiBold" 
                                    Foreground="#CCC" FontSize="11"
                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         <Button Content="✕" Command="{Binding CloseDiscoveryPanelCommand}"
                                 HorizontalAlignment="Right" VerticalAlignment="Center"
                                 FontSize="12" Foreground="#666" Background="Transparent"
-                                BorderThickness="0" Cursor="Hand" Padding="8,2"
+                                BorderThickness="0" Cursor="Hand" Padding="6,1"
+                                Width="24" Height="20"
                                 x:Name="CloseDiscoveryBtn">
                             <Button.Style>
                                 <Style TargetType="Button">
@@ -732,14 +715,13 @@
                                         <Setter.Value>
                                             <ControlTemplate TargetType="Button">
                                                 <Border x:Name="btnBorder" Background="{TemplateBinding Background}"
-                                                        CornerRadius="4" Padding="{TemplateBinding Padding}">
+                                                        CornerRadius="3" BorderThickness="1" BorderBrush="Transparent">
                                                     <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                                 </Border>
                                                 <ControlTemplate.Triggers>
                                                     <Trigger Property="IsMouseOver" Value="True">
                                                         <Setter TargetName="btnBorder" Property="Background" Value="#3A3A3A"/>
                                                         <Setter TargetName="btnBorder" Property="BorderBrush" Value="#4A90D9"/>
-                                                        <Setter TargetName="btnBorder" Property="BorderThickness" Value="1"/>
                                                         <Setter Property="Foreground" Value="#AAA"/>
                                                     </Trigger>
                                                 </ControlTemplate.Triggers>
@@ -756,10 +738,10 @@
                             <DataTemplate>
                                 <Grid Margin="0,0,0,4">
                                     <Border x:Name="DeviceGlow" Background="Transparent" CornerRadius="8"
-                                            BorderThickness="2" BorderBrush="Transparent"
+                                            BorderThickness="4" BorderBrush="Transparent"
                                             Opacity="0" IsHitTestVisible="False">
                                         <Border.Effect>
-                                            <DropShadowEffect Color="#4A90D9" BlurRadius="12" ShadowDepth="0" Opacity="0.5"/>
+                                            <DropShadowEffect Color="#4A90D9" BlurRadius="16" ShadowDepth="0" Opacity="0.7"/>
                                         </Border.Effect>
                                     </Border>
                                     <Border Background="#2D2D2D" CornerRadius="6" Padding="10,6" MinWidth="180"
