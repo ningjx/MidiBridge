@@ -8,6 +8,7 @@ using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Controls;
+using System.Windows.Media.Animation;
 using MidiBridge.Controls;
 using MidiBridge.Models;
 using MidiBridge.ViewModels;
@@ -338,6 +339,8 @@ public partial class MainWindow : Window
         };
 
         path.MouseLeftButtonDown += Connection_LeftClick;
+        path.MouseEnter += Connection_MouseEnter;
+        path.MouseLeave += Connection_MouseLeave;
 
         if (route.IsEffectivelyEnabled && route.IsTransmitting)
         {
@@ -351,6 +354,49 @@ public partial class MainWindow : Window
         }
 
         return path;
+    }
+
+    private void Connection_MouseEnter(object sender, MouseEventArgs e)
+    {
+        if (sender is Path path)
+        {
+            var thicknessAnim = new DoubleAnimation(path.StrokeThickness + 2, TimeSpan.FromMilliseconds(100));
+            path.BeginAnimation(Path.StrokeThicknessProperty, thicknessAnim);
+            
+            if (path.Effect == null)
+            {
+                path.Effect = new DropShadowEffect
+                {
+                    Color = Colors.White,
+                    BlurRadius = 0,
+                    ShadowDepth = 0,
+                    Opacity = 0.5
+                };
+            }
+            
+            if (path.Effect is DropShadowEffect effect)
+            {
+                var blurAnim = new DoubleAnimation(0, 10, TimeSpan.FromMilliseconds(100));
+                effect.BeginAnimation(DropShadowEffect.BlurRadiusProperty, blurAnim);
+            }
+        }
+    }
+
+    private void Connection_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (sender is Path path)
+        {
+            var currentThickness = path.StrokeThickness;
+            var targetThickness = currentThickness > 3 ? 3 : 2;
+            var thicknessAnim = new DoubleAnimation(targetThickness, TimeSpan.FromMilliseconds(100));
+            path.BeginAnimation(Path.StrokeThicknessProperty, thicknessAnim);
+            
+            if (path.Effect is DropShadowEffect effect && effect.Color == Colors.White)
+            {
+                var blurAnim = new DoubleAnimation(10, 0, TimeSpan.FromMilliseconds(100));
+                effect.BeginAnimation(DropShadowEffect.BlurRadiusProperty, blurAnim);
+            }
+        }
     }
 
     private Color GetRouteColor(string sourceId)
@@ -676,5 +722,142 @@ protected override void OnMouseUp(MouseButtonEventArgs e)
     private void CloseButton_Click(object sender, RoutedEventArgs e)
     {
         Close();
+    }
+
+    private void Device_MouseEnter(object sender, MouseEventArgs e)
+    {
+        if (sender is Border border)
+        {
+            var parent = VisualTreeHelper.GetParent(border) as Grid;
+            if (parent != null)
+            {
+                var glowBorder = parent.Children.OfType<Border>().FirstOrDefault(b => b.Name == "GlowBorder");
+                if (glowBorder != null)
+                {
+                    var animation = new DoubleAnimation(0, 12, TimeSpan.FromMilliseconds(150));
+                    var opacityAnimation = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(150));
+                    
+                    glowBorder.BeginAnimation(Border.OpacityProperty, opacityAnimation);
+                    if (glowBorder.Effect is DropShadowEffect effect)
+                    {
+                        effect.BeginAnimation(DropShadowEffect.BlurRadiusProperty, animation);
+                    }
+                }
+            }
+        }
+    }
+
+    private void Device_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (sender is Border border)
+        {
+            var parent = VisualTreeHelper.GetParent(border) as Grid;
+            if (parent != null)
+            {
+                var glowBorder = parent.Children.OfType<Border>().FirstOrDefault(b => b.Name == "GlowBorder");
+                if (glowBorder != null)
+                {
+                    var animation = new DoubleAnimation(12, 0, TimeSpan.FromMilliseconds(150));
+                    var opacityAnimation = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(150));
+                    
+                    glowBorder.BeginAnimation(Border.OpacityProperty, opacityAnimation);
+                    if (glowBorder.Effect is DropShadowEffect effect)
+                    {
+                        effect.BeginAnimation(DropShadowEffect.BlurRadiusProperty, animation);
+                    }
+                }
+            }
+        }
+    }
+
+    private void Connector_MouseEnter(object sender, MouseEventArgs e)
+    {
+        if (sender is Ellipse ellipse)
+        {
+            var transform = ellipse.RenderTransform as ScaleTransform;
+            if (transform == null)
+            {
+                transform = new ScaleTransform(1, 1, 9, 9);
+                ellipse.RenderTransform = transform;
+            }
+            
+            var scaleXAnim = new DoubleAnimation(1.15, TimeSpan.FromMilliseconds(100));
+            var scaleYAnim = new DoubleAnimation(1.15, TimeSpan.FromMilliseconds(100));
+            transform.BeginAnimation(ScaleTransform.ScaleXProperty, scaleXAnim);
+            transform.BeginAnimation(ScaleTransform.ScaleYProperty, scaleYAnim);
+            
+            var parent = VisualTreeHelper.GetParent(ellipse) as Grid;
+            if (parent != null)
+            {
+                var glow = parent.Children.OfType<Ellipse>().FirstOrDefault(el => el.Name == "ConnectorGlow");
+                if (glow != null)
+                {
+                    var opacityAnim = new DoubleAnimation(0, 0.8, TimeSpan.FromMilliseconds(100));
+                    glow.BeginAnimation(Ellipse.OpacityProperty, opacityAnim);
+                    glow.Stroke = new SolidColorBrush(Color.FromRgb(74, 144, 217));
+                }
+            }
+        }
+    }
+
+    private void Connector_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (sender is Ellipse ellipse)
+        {
+            var transform = ellipse.RenderTransform as ScaleTransform;
+            if (transform != null)
+            {
+                var scaleXAnim = new DoubleAnimation(1, TimeSpan.FromMilliseconds(100));
+                var scaleYAnim = new DoubleAnimation(1, TimeSpan.FromMilliseconds(100));
+                transform.BeginAnimation(ScaleTransform.ScaleXProperty, scaleXAnim);
+                transform.BeginAnimation(ScaleTransform.ScaleYProperty, scaleYAnim);
+            }
+            
+            var parent = VisualTreeHelper.GetParent(ellipse) as Grid;
+            if (parent != null)
+            {
+                var glow = parent.Children.OfType<Ellipse>().FirstOrDefault(el => el.Name == "ConnectorGlow");
+                if (glow != null)
+                {
+                    var opacityAnim = new DoubleAnimation(0.8, 0, TimeSpan.FromMilliseconds(100));
+                    glow.BeginAnimation(Ellipse.OpacityProperty, opacityAnim);
+                }
+            }
+        }
+    }
+
+    private void NM2Device_MouseEnter(object sender, MouseEventArgs e)
+    {
+        if (sender is Border border)
+        {
+            var parent = VisualTreeHelper.GetParent(border) as Grid;
+            if (parent != null)
+            {
+                var glow = parent.Children.OfType<Border>().FirstOrDefault(b => b.Name == "DeviceGlow");
+                if (glow != null)
+                {
+                    var opacityAnim = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(150));
+                    glow.BeginAnimation(Border.OpacityProperty, opacityAnim);
+                    glow.BorderBrush = new SolidColorBrush(Color.FromRgb(74, 144, 217));
+                }
+            }
+        }
+    }
+
+    private void NM2Device_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (sender is Border border)
+        {
+            var parent = VisualTreeHelper.GetParent(border) as Grid;
+            if (parent != null)
+            {
+                var glow = parent.Children.OfType<Border>().FirstOrDefault(b => b.Name == "DeviceGlow");
+                if (glow != null)
+                {
+                    var opacityAnim = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(150));
+                    glow.BeginAnimation(Border.OpacityProperty, opacityAnim);
+                }
+            }
+        }
     }
 }

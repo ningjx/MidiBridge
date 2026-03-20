@@ -1,4 +1,4 @@
-﻿<Window x:Class="MidiBridge.MainWindow"
+<Window x:Class="MidiBridge.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:MidiBridge.ViewModels"
@@ -32,7 +32,8 @@
         <SolidColorBrush x:Key="ConnectorNormal" Color="#4A90D9"/>
         <SolidColorBrush x:Key="ConnectorActive" Color="#5CB85C"/>
         
-        <!-- 现代化右键菜单样式 -->
+        <Duration x:Key="AnimDuration">0:0:0.15</Duration>
+        
         <Style x:Key="ModernContextMenu" TargetType="ContextMenu">
             <Setter Property="Background" Value="#2D2D2D"/>
             <Setter Property="BorderBrush" Value="#3D3D3D"/>
@@ -74,7 +75,6 @@
             </Setter>
         </Style>
         
-        <!-- 现代化按钮样式 -->
         <Style x:Key="ModernButton" TargetType="Button">
             <Setter Property="Background" Value="#3D3D3D"/>
             <Setter Property="Foreground" Value="#E0E0E0"/>
@@ -109,7 +109,6 @@
             </Setter>
         </Style>
         
-        <!-- 强调按钮样式（蓝色） -->
         <Style x:Key="AccentButton" TargetType="Button" BasedOn="{StaticResource ModernButton}">
             <Setter Property="Background" Value="#4A90D9"/>
             <Style.Triggers>
@@ -122,7 +121,6 @@
             </Style.Triggers>
         </Style>
         
-        <!-- 危险按钮样式（红色） -->
         <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource ModernButton}">
             <Setter Property="Background" Value="#C75050"/>
             <Style.Triggers>
@@ -135,7 +133,6 @@
             </Style.Triggers>
         </Style>
         
-        <!-- 成功按钮样式（绿色） -->
         <Style x:Key="SuccessButton" TargetType="Button" BasedOn="{StaticResource ModernButton}">
             <Setter Property="Background" Value="#5CB85C"/>
             <Style.Triggers>
@@ -148,7 +145,6 @@
             </Style.Triggers>
         </Style>
         
-        <!-- 现代化输入框样式 -->
         <Style x:Key="ModernTextBox" TargetType="TextBox">
             <Setter Property="Background" Value="#2D2D2D"/>
             <Setter Property="Foreground" Value="#E0E0E0"/>
@@ -188,7 +184,6 @@
             </Setter>
         </Style>
         
-        <!-- 带警告的端口输入框样式 -->
         <Style x:Key="PortTextBox" TargetType="TextBox">
             <Setter Property="Background" Value="#2D2D2D"/>
             <Setter Property="Foreground" Value="#E0E0E0"/>
@@ -232,7 +227,6 @@
             </Setter>
         </Style>
         
-        <!-- 小型输入框样式 -->
         <Style x:Key="SmallTextBox" TargetType="TextBox">
             <Setter Property="Background" Value="#2D2D2D"/>
             <Setter Property="Foreground" Value="#E0E0E0"/>
@@ -276,7 +270,6 @@
             </Setter>
         </Style>
         
-        <!-- 透明按钮样式 -->
         <Style x:Key="TransparentButton" TargetType="Button">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="#888"/>
@@ -312,7 +305,6 @@
             </Setter>
         </Style>
         
-        <!-- 标题栏按钮样式 -->
         <Style x:Key="TitleBarButton" TargetType="Button">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="#AAA"/>
@@ -336,7 +328,6 @@
             </Setter>
         </Style>
         
-        <!-- 关闭按钮样式 -->
         <Style x:Key="CloseButton" TargetType="Button" BasedOn="{StaticResource TitleBarButton}">
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
@@ -355,7 +346,6 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- 自定义标题栏 -->
         <Border Grid.Row="0" Background="{StaticResource HeaderBg}" BorderBrush="#2A2A2A" BorderThickness="0,0,0,1"
                 MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
             <Grid Height="32">
@@ -375,7 +365,6 @@
             </Grid>
         </Border>
 
-        <!-- 顶部工具栏 -->
         <Border Grid.Row="1" Background="{StaticResource HeaderBg}" Padding="10,6" BorderBrush="#2A2A2A" BorderThickness="0,0,0,1">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -386,14 +375,12 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- 左侧：输入设备标题 -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="5,0,15,0">
                     <TextBlock Text="输入设备" FontWeight="SemiBold" Foreground="#CCC"/>
                     <TextBlock Text="{Binding InputDevices.Count, StringFormat=' ({0})'}" 
                                Foreground="#888"/>
                 </StackPanel>
 
-                <!-- 端口设置 -->
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,15,0">
                     <TextBlock Text="RTP-MIDI:" VerticalAlignment="Center" Foreground="#AAA" Margin="0,0,6,0"/>
                     <TextBox x:Name="RtpPortTextBox" 
@@ -412,10 +399,8 @@
                              Tag="{Binding NM2PortWarning, Converter={StaticResource BoolToWarningTag}}"/>
                 </StackPanel>
 
-                <!-- 中间填充 -->
                 <Border Grid.Column="2"/>
 
-                <!-- 按钮区域 -->
                 <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="15,0,15,0">
                     <Button Content="扫描本地设备" Command="{Binding ScanCommand}" Style="{StaticResource ModernButton}" Margin="0,0,10,0"/>
                     <Button Content="发现NM2设备" Command="{Binding RefreshNM2DiscoveryCommand}" Style="{StaticResource ModernButton}" Margin="0,0,10,0"
@@ -435,7 +420,6 @@
                     </Button>
                 </StackPanel>
 
-                <!-- 右侧：输出设备标题 -->
                 <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" Margin="15,0,5,0">
                     <TextBlock Text="输出设备" FontWeight="SemiBold" Foreground="#CCC"/>
                     <TextBlock Text="{Binding OutputDevices.Count, StringFormat=' ({0})'}" 
@@ -444,7 +428,6 @@
             </Grid>
         </Border>
 
-        <!-- 主连线区域 -->
         <Grid Grid.Row="2" Background="#1A1A1A">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="220"/>
@@ -452,111 +435,133 @@
                 <ColumnDefinition Width="220"/>
             </Grid.ColumnDefinitions>
 
-            <!-- 连线画布 - 放在设备列表下方 -->
             <Canvas Grid.Column="0" Grid.ColumnSpan="3" x:Name="ConnectionCanvas" 
                     Background="{x:Null}" Panel.ZIndex="0"/>
             
-            <!-- 左侧：输入设备列表 -->
             <Grid Grid.Column="0">
                 <ScrollViewer x:Name="InputScrollViewer" VerticalScrollBarVisibility="Hidden" ScrollChanged="ScrollViewer_ScrollChanged" Panel.ZIndex="1">
                     <ItemsControl ItemsSource="{Binding InputDevices}" x:Name="InputItemsControl">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Border Background="{StaticResource ItemBg}" CornerRadius="6" Margin="3" Padding="12,10"
-                                    BorderThickness="1"
-                                    Tag="{Binding Id}" Cursor="Hand"
-                                    MouseLeftButtonDown="Device_MouseLeftButtonDown"
-                                    MouseMove="Device_MouseMove"
-                                    MouseRightButtonDown="Device_RightClick">
-                                <Border.Style>
-                                    <Style TargetType="Border">
-                                        <Setter Property="BorderBrush" Value="#4A90D9"/>
-                                        <Style.Triggers>
-                                            <Trigger Property="IsMouseOver" Value="True">
-                                                <Setter Property="Background" Value="#323232"/>
-                                            </Trigger>
-                                            <DataTrigger Binding="{Binding IsEnabled}" Value="False">
-                                                <Setter Property="BorderBrush" Value="#3D3D3D"/>
-                                                <Setter Property="Opacity" Value="0.5"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </Border.Style>
-                                <Border.ContextMenu>
-                                    <ContextMenu Style="{StaticResource ModernContextMenu}" Opened="ContextMenu_Opened">
-                                        <MenuItem Header="禁用" Style="{StaticResource ModernMenuItem}"/>
-                                    </ContextMenu>
-                                </Border.ContextMenu>
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
+                            <Grid Margin="3">
+                                <Border x:Name="GlowBorder" Background="Transparent" CornerRadius="8"
+                                        BorderThickness="0" Opacity="0"
+                                        IsHitTestVisible="False">
+                                    <Border.Effect>
+                                        <DropShadowEffect x:Name="GlowEffect" Color="#4A90D9" 
+                                                          BlurRadius="0" ShadowDepth="0" Opacity="0"/>
+                                    </Border.Effect>
+                                </Border>
+                                <Border x:Name="DeviceBorder" Background="{StaticResource ItemBg}" CornerRadius="6" Padding="12,10"
+                                        BorderThickness="1"
+                                        Tag="{Binding Id}" Cursor="Hand"
+                                        MouseLeftButtonDown="Device_MouseLeftButtonDown"
+                                        MouseMove="Device_MouseMove"
+                                        MouseRightButtonDown="Device_RightClick"
+                                        MouseEnter="Device_MouseEnter"
+                                        MouseLeave="Device_MouseLeave">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="BorderBrush" Value="#4A90D9"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsEnabled}" Value="False">
+                                                    <Setter Property="BorderBrush" Value="#3D3D3D"/>
+                                                    <Setter Property="Opacity" Value="0.5"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <Border.ContextMenu>
+                                        <ContextMenu Style="{StaticResource ModernContextMenu}" Opened="ContextMenu_Opened">
+                                            <MenuItem Header="禁用" Style="{StaticResource ModernMenuItem}"/>
+                                        </ContextMenu>
+                                    </Border.ContextMenu>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
 
-                                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,10,0">
-                                        <TextBlock Text="{Binding Name, Mode=OneWay}" FontWeight="Medium" FontSize="12" 
-                                                  Foreground="#E0E0E0" TextTrimming="CharacterEllipsis"/>
-                                        <TextBlock FontSize="10" Foreground="#777" Margin="0,3,0,0">
-                                            <Run Text="{Binding TypeText, Mode=OneWay}"/>
-                                        </TextBlock>
-                                    </StackPanel>
+                                        <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,10,0">
+                                            <TextBlock Text="{Binding Name, Mode=OneWay}" FontWeight="Medium" FontSize="12" 
+                                                      Foreground="#E0E0E0" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock FontSize="10" Foreground="#777" Margin="0,3,0,0">
+                                                <Run Text="{Binding TypeText, Mode=OneWay}"/>
+                                            </TextBlock>
+                                        </StackPanel>
 
-                                    <!-- 连接点 -->
-                                    <Ellipse Grid.Column="1" Width="18" Height="18"
-                                              StrokeThickness="3" Cursor="Hand"
-                                              VerticalAlignment="Center"
-                                              ToolTip="点击选择，然后点击输出设备创建连线"
-                                              MouseLeftButtonDown="InputConnector_Click">
-                                        <Ellipse.Style>
-                                            <Style TargetType="Ellipse">
-                                                <Setter Property="Stroke" Value="#666666"/>
-                                                <Setter Property="Fill" Value="#3A3A3A"/>
-                                                <Style.Triggers>
-                                                    <MultiDataTrigger>
-                                                        <MultiDataTrigger.Conditions>
-                                                            <Condition Binding="{Binding IsEnabled}" Value="True"/>
-                                                            <Condition Binding="{Binding IsSelected}" Value="False"/>
-                                                            <Condition Binding="{Binding IsTransmitting}" Value="False"/>
-                                                        </MultiDataTrigger.Conditions>
-                                                        <Setter Property="Stroke" Value="{StaticResource ConnectorNormal}"/>
-                                                        <Setter Property="Fill" Value="#1A1A1A"/>
-                                                    </MultiDataTrigger>
-                                                    <MultiDataTrigger>
-                                                        <MultiDataTrigger.Conditions>
-                                                            <Condition Binding="{Binding IsEnabled}" Value="True"/>
-                                                            <Condition Binding="{Binding IsSelected}" Value="True"/>
-                                                        </MultiDataTrigger.Conditions>
-                                                        <Setter Property="Stroke" Value="Orange"/>
-                                                        <Setter Property="Fill" Value="Orange"/>
-                                                    </MultiDataTrigger>
-                                                    <MultiDataTrigger>
-                                                        <MultiDataTrigger.Conditions>
-                                                            <Condition Binding="{Binding IsEnabled}" Value="True"/>
-                                                            <Condition Binding="{Binding IsTransmitting}" Value="True"/>
-                                                        </MultiDataTrigger.Conditions>
-                                                        <Setter Property="Stroke" Value="#5CB85C"/>
-                                                        <Setter Property="Fill" Value="#5CB85C"/>
-                                                        <Setter Property="Effect">
+                                        <Grid Grid.Column="1" Width="24" Height="24">
+                                            <Ellipse x:Name="ConnectorGlow" Width="24" Height="24"
+                                                     Fill="Transparent" Stroke="Transparent" StrokeThickness="4"
+                                                     Opacity="0" IsHitTestVisible="False">
+                                                <Ellipse.Effect>
+                                                    <DropShadowEffect Color="#4A90D9" BlurRadius="8" ShadowDepth="0" Opacity="0.6"/>
+                                                </Ellipse.Effect>
+                                            </Ellipse>
+                                            <Ellipse Width="18" Height="18"
+                                                      StrokeThickness="3" Cursor="Hand"
+                                                      VerticalAlignment="Center" HorizontalAlignment="Center"
+                                                      ToolTip="点击选择，然后点击输出设备创建连线"
+                                                      MouseLeftButtonDown="InputConnector_Click"
+                                                      MouseEnter="Connector_MouseEnter"
+                                                      MouseLeave="Connector_MouseLeave">
+                                                <Ellipse.Style>
+                                                    <Style TargetType="Ellipse">
+                                                        <Setter Property="Stroke" Value="#666666"/>
+                                                        <Setter Property="Fill" Value="#3A3A3A"/>
+                                                        <Setter Property="RenderTransform">
                                                             <Setter.Value>
-                                                                <DropShadowEffect Color="#5CB85C" BlurRadius="15" ShadowDepth="0" Opacity="1"/>
+                                                                <ScaleTransform CenterX="9" CenterY="9"/>
                                                             </Setter.Value>
                                                         </Setter>
-                                                    </MultiDataTrigger>
-                                                    <MultiDataTrigger>
-                                                        <MultiDataTrigger.Conditions>
-                                                            <Condition Binding="{Binding IsEnabled}" Value="True"/>
-                                                            <Condition Binding="{Binding HasActiveRoute}" Value="True"/>
-                                                            <Condition Binding="{Binding IsSelected}" Value="False"/>
-                                                            <Condition Binding="{Binding IsTransmitting}" Value="False"/>
-                                                        </MultiDataTrigger.Conditions>
-                                                        <Setter Property="Stroke" Value="{StaticResource ConnectorActive}"/>
-                                                    </MultiDataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </Ellipse.Style>
-                                    </Ellipse>
-                                </Grid>
-                            </Border>
+                                                        <Style.Triggers>
+                                                            <MultiDataTrigger>
+                                                                <MultiDataTrigger.Conditions>
+                                                                    <Condition Binding="{Binding IsEnabled}" Value="True"/>
+                                                                    <Condition Binding="{Binding IsSelected}" Value="False"/>
+                                                                    <Condition Binding="{Binding IsTransmitting}" Value="False"/>
+                                                                </MultiDataTrigger.Conditions>
+                                                                <Setter Property="Stroke" Value="{StaticResource ConnectorNormal}"/>
+                                                                <Setter Property="Fill" Value="#1A1A1A"/>
+                                                            </MultiDataTrigger>
+                                                            <MultiDataTrigger>
+                                                                <MultiDataTrigger.Conditions>
+                                                                    <Condition Binding="{Binding IsEnabled}" Value="True"/>
+                                                                    <Condition Binding="{Binding IsSelected}" Value="True"/>
+                                                                </MultiDataTrigger.Conditions>
+                                                                <Setter Property="Stroke" Value="Orange"/>
+                                                                <Setter Property="Fill" Value="Orange"/>
+                                                            </MultiDataTrigger>
+                                                            <MultiDataTrigger>
+                                                                <MultiDataTrigger.Conditions>
+                                                                    <Condition Binding="{Binding IsEnabled}" Value="True"/>
+                                                                    <Condition Binding="{Binding IsTransmitting}" Value="True"/>
+                                                                </MultiDataTrigger.Conditions>
+                                                                <Setter Property="Stroke" Value="#5CB85C"/>
+                                                                <Setter Property="Fill" Value="#5CB85C"/>
+                                                                <Setter Property="Effect">
+                                                                    <Setter.Value>
+                                                                        <DropShadowEffect Color="#5CB85C" BlurRadius="15" ShadowDepth="0" Opacity="1"/>
+                                                                    </Setter.Value>
+                                                                </Setter>
+                                                            </MultiDataTrigger>
+                                                            <MultiDataTrigger>
+                                                                <MultiDataTrigger.Conditions>
+                                                                    <Condition Binding="{Binding IsEnabled}" Value="True"/>
+                                                                    <Condition Binding="{Binding HasActiveRoute}" Value="True"/>
+                                                                    <Condition Binding="{Binding IsSelected}" Value="False"/>
+                                                                    <Condition Binding="{Binding IsTransmitting}" Value="False"/>
+                                                                </MultiDataTrigger.Conditions>
+                                                                <Setter Property="Stroke" Value="{StaticResource ConnectorActive}"/>
+                                                            </MultiDataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Ellipse.Style>
+                                            </Ellipse>
+                                        </Grid>
+                                    </Grid>
+                                </Border>
+                            </Grid>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
@@ -564,107 +569,130 @@
                 <Canvas x:Name="InputDropCanvas" Panel.ZIndex="0" IsHitTestVisible="False"/>
             </Grid>
 
-            <!-- 右侧：输出设备列表 -->
             <Grid Grid.Column="2">
                 <ScrollViewer x:Name="OutputScrollViewer" VerticalScrollBarVisibility="Hidden" ScrollChanged="ScrollViewer_ScrollChanged" Panel.ZIndex="1">
                 <ItemsControl ItemsSource="{Binding OutputDevices}" x:Name="OutputItemsControl">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Border Background="{StaticResource ItemBg}" CornerRadius="6" Margin="3" Padding="12,10"
-                                    BorderThickness="1"
-                                    Tag="{Binding Id}" Cursor="Hand"
-                                    MouseLeftButtonDown="Device_MouseLeftButtonDown"
-                                    MouseMove="Device_MouseMove"
-                                    MouseRightButtonDown="Device_RightClick">
-                                <Border.Style>
-                                    <Style TargetType="Border">
-                                        <Setter Property="BorderBrush" Value="#4A90D9"/>
-                                        <Style.Triggers>
-                                            <Trigger Property="IsMouseOver" Value="True">
-                                                <Setter Property="Background" Value="#323232"/>
-                                            </Trigger>
-                                            <DataTrigger Binding="{Binding IsEnabled}" Value="False">
-                                                <Setter Property="BorderBrush" Value="#3D3D3D"/>
-                                                <Setter Property="Opacity" Value="0.5"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </Border.Style>
-                                <Border.ContextMenu>
-                                    <ContextMenu Style="{StaticResource ModernContextMenu}" Opened="ContextMenu_Opened">
-                                        <MenuItem Header="禁用" Style="{StaticResource ModernMenuItem}"/>
-                                    </ContextMenu>
-                                </Border.ContextMenu>
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
+                            <Grid Margin="3">
+                                <Border x:Name="GlowBorder" Background="Transparent" CornerRadius="8"
+                                        BorderThickness="0" Opacity="0"
+                                        IsHitTestVisible="False">
+                                    <Border.Effect>
+                                        <DropShadowEffect x:Name="GlowEffect" Color="#4A90D9" 
+                                                          BlurRadius="0" ShadowDepth="0" Opacity="0"/>
+                                    </Border.Effect>
+                                </Border>
+                                <Border x:Name="DeviceBorder" Background="{StaticResource ItemBg}" CornerRadius="6" Padding="12,10"
+                                        BorderThickness="1"
+                                        Tag="{Binding Id}" Cursor="Hand"
+                                        MouseLeftButtonDown="Device_MouseLeftButtonDown"
+                                        MouseMove="Device_MouseMove"
+                                        MouseRightButtonDown="Device_RightClick"
+                                        MouseEnter="Device_MouseEnter"
+                                        MouseLeave="Device_MouseLeave">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="BorderBrush" Value="#4A90D9"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsEnabled}" Value="False">
+                                                    <Setter Property="BorderBrush" Value="#3D3D3D"/>
+                                                    <Setter Property="Opacity" Value="0.5"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <Border.ContextMenu>
+                                        <ContextMenu Style="{StaticResource ModernContextMenu}" Opened="ContextMenu_Opened">
+                                            <MenuItem Header="禁用" Style="{StaticResource ModernMenuItem}"/>
+                                        </ContextMenu>
+                                    </Border.ContextMenu>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
 
-                                    <!-- 连接点 -->
-                                    <Ellipse Grid.Column="0" Width="18" Height="18"
-                                             StrokeThickness="3" Cursor="Hand"
-                                             VerticalAlignment="Center" Margin="0,0,10,0"
-                                             ToolTip="点击选择作为连线目标"
-                                             MouseLeftButtonDown="OutputConnector_Click">
-                                        <Ellipse.Style>
-                                            <Style TargetType="Ellipse">
-                                                <Setter Property="Stroke" Value="#666666"/>
-                                                <Setter Property="Fill" Value="#3A3A3A"/>
-                                                <Style.Triggers>
-                                                    <MultiDataTrigger>
-                                                        <MultiDataTrigger.Conditions>
-                                                            <Condition Binding="{Binding IsEnabled}" Value="True"/>
-                                                            <Condition Binding="{Binding IsSelected}" Value="False"/>
-                                                            <Condition Binding="{Binding IsTransmitting}" Value="False"/>
-                                                        </MultiDataTrigger.Conditions>
-                                                        <Setter Property="Stroke" Value="{StaticResource ConnectorNormal}"/>
-                                                        <Setter Property="Fill" Value="#1A1A1A"/>
-                                                    </MultiDataTrigger>
-                                                    <MultiDataTrigger>
-                                                        <MultiDataTrigger.Conditions>
-                                                            <Condition Binding="{Binding IsEnabled}" Value="True"/>
-                                                            <Condition Binding="{Binding IsSelected}" Value="True"/>
-                                                        </MultiDataTrigger.Conditions>
-                                                        <Setter Property="Stroke" Value="Orange"/>
-                                                        <Setter Property="Fill" Value="Orange"/>
-                                                    </MultiDataTrigger>
-                                                    <MultiDataTrigger>
-                                                        <MultiDataTrigger.Conditions>
-                                                            <Condition Binding="{Binding IsEnabled}" Value="True"/>
-                                                            <Condition Binding="{Binding IsTransmitting}" Value="True"/>
-                                                        </MultiDataTrigger.Conditions>
-                                                        <Setter Property="Stroke" Value="#5CB85C"/>
-                                                        <Setter Property="Fill" Value="#5CB85C"/>
-                                                        <Setter Property="Effect">
+                                        <Grid Grid.Column="0" Width="24" Height="24" Margin="0,0,10,0">
+                                            <Ellipse x:Name="ConnectorGlow" Width="24" Height="24"
+                                                     Fill="Transparent" Stroke="Transparent" StrokeThickness="4"
+                                                     Opacity="0" IsHitTestVisible="False">
+                                                <Ellipse.Effect>
+                                                    <DropShadowEffect Color="#4A90D9" BlurRadius="8" ShadowDepth="0" Opacity="0.6"/>
+                                                </Ellipse.Effect>
+                                            </Ellipse>
+                                            <Ellipse Width="18" Height="18"
+                                                     StrokeThickness="3" Cursor="Hand"
+                                                     VerticalAlignment="Center" HorizontalAlignment="Center"
+                                                     ToolTip="点击选择作为连线目标"
+                                                     MouseLeftButtonDown="OutputConnector_Click"
+                                                     MouseEnter="Connector_MouseEnter"
+                                                     MouseLeave="Connector_MouseLeave">
+                                                <Ellipse.Style>
+                                                    <Style TargetType="Ellipse">
+                                                        <Setter Property="Stroke" Value="#666666"/>
+                                                        <Setter Property="Fill" Value="#3A3A3A"/>
+                                                        <Setter Property="RenderTransform">
                                                             <Setter.Value>
-                                                                <DropShadowEffect Color="#5CB85C" BlurRadius="15" ShadowDepth="0" Opacity="1"/>
+                                                                <ScaleTransform CenterX="9" CenterY="9"/>
                                                             </Setter.Value>
                                                         </Setter>
-                                                    </MultiDataTrigger>
-                                                    <MultiDataTrigger>
-                                                        <MultiDataTrigger.Conditions>
-                                                            <Condition Binding="{Binding IsEnabled}" Value="True"/>
-                                                            <Condition Binding="{Binding HasActiveRoute}" Value="True"/>
-                                                            <Condition Binding="{Binding IsSelected}" Value="False"/>
-                                                            <Condition Binding="{Binding IsTransmitting}" Value="False"/>
-                                                        </MultiDataTrigger.Conditions>
-                                                        <Setter Property="Stroke" Value="{StaticResource ConnectorActive}"/>
-                                                    </MultiDataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </Ellipse.Style>
-                                    </Ellipse>
+                                                        <Style.Triggers>
+                                                            <MultiDataTrigger>
+                                                                <MultiDataTrigger.Conditions>
+                                                                    <Condition Binding="{Binding IsEnabled}" Value="True"/>
+                                                                    <Condition Binding="{Binding IsSelected}" Value="False"/>
+                                                                    <Condition Binding="{Binding IsTransmitting}" Value="False"/>
+                                                                </MultiDataTrigger.Conditions>
+                                                                <Setter Property="Stroke" Value="{StaticResource ConnectorNormal}"/>
+                                                                <Setter Property="Fill" Value="#1A1A1A"/>
+                                                            </MultiDataTrigger>
+                                                            <MultiDataTrigger>
+                                                                <MultiDataTrigger.Conditions>
+                                                                    <Condition Binding="{Binding IsEnabled}" Value="True"/>
+                                                                    <Condition Binding="{Binding IsSelected}" Value="True"/>
+                                                                </MultiDataTrigger.Conditions>
+                                                                <Setter Property="Stroke" Value="Orange"/>
+                                                                <Setter Property="Fill" Value="Orange"/>
+                                                            </MultiDataTrigger>
+                                                            <MultiDataTrigger>
+                                                                <MultiDataTrigger.Conditions>
+                                                                    <Condition Binding="{Binding IsEnabled}" Value="True"/>
+                                                                    <Condition Binding="{Binding IsTransmitting}" Value="True"/>
+                                                                </MultiDataTrigger.Conditions>
+                                                                <Setter Property="Stroke" Value="#5CB85C"/>
+                                                                <Setter Property="Fill" Value="#5CB85C"/>
+                                                                <Setter Property="Effect">
+                                                                    <Setter.Value>
+                                                                        <DropShadowEffect Color="#5CB85C" BlurRadius="15" ShadowDepth="0" Opacity="1"/>
+                                                                    </Setter.Value>
+                                                                </Setter>
+                                                            </MultiDataTrigger>
+                                                            <MultiDataTrigger>
+                                                                <MultiDataTrigger.Conditions>
+                                                                    <Condition Binding="{Binding IsEnabled}" Value="True"/>
+                                                                    <Condition Binding="{Binding HasActiveRoute}" Value="True"/>
+                                                                    <Condition Binding="{Binding IsSelected}" Value="False"/>
+                                                                    <Condition Binding="{Binding IsTransmitting}" Value="False"/>
+                                                                </MultiDataTrigger.Conditions>
+                                                                <Setter Property="Stroke" Value="{StaticResource ConnectorActive}"/>
+                                                            </MultiDataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Ellipse.Style>
+                                            </Ellipse>
+                                        </Grid>
 
-                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                        <TextBlock Text="{Binding Name, Mode=OneWay}" FontWeight="Medium" FontSize="12" 
-                                                  Foreground="#E0E0E0" TextTrimming="CharacterEllipsis"/>
-                                        <TextBlock FontSize="10" Foreground="#777" Margin="0,3,0,0">
-                                            <Run Text="{Binding TypeText, Mode=OneWay}"/>
-                                        </TextBlock>
-                                    </StackPanel>
-                                </Grid>
-                            </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Name, Mode=OneWay}" FontWeight="Medium" FontSize="12" 
+                                                      Foreground="#E0E0E0" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock FontSize="10" Foreground="#777" Margin="0,3,0,0">
+                                                <Run Text="{Binding TypeText, Mode=OneWay}"/>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </Grid>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
@@ -672,19 +700,18 @@
                 <Canvas x:Name="OutputDropCanvas" Panel.ZIndex="0" IsHitTestVisible="False"/>
             </Grid>
 
-            <!-- 连线提示 -->
             <TextBlock Grid.Column="1" Text="点击左侧输入设备的连接点，然后点击右侧输出设备创建连线&#x0a;右键点击连线可删除"
                       Foreground="#444" FontSize="11" TextAlignment="Center"
                       HorizontalAlignment="Center" VerticalAlignment="Center"
                       TextWrapping="Wrap" IsHitTestVisible="False"
                       Panel.ZIndex="-1"/>
             
-            <!-- NM2 发现设备面板 -->
             <Border Grid.Column="1" Background="#252525" CornerRadius="8" Padding="12"
                     VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,10"
                     Visibility="{Binding ShowNM2DevicesPanel, Converter={StaticResource BoolToVis}}"
                     Panel.ZIndex="2" MinWidth="220"
-                    BorderBrush="#3D3D3D" BorderThickness="1">
+                    BorderBrush="#3D3D3D" BorderThickness="1"
+                    x:Name="NM2Panel">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -696,22 +723,29 @@
                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         <Button Content="✕" Command="{Binding CloseDiscoveryPanelCommand}"
                                 HorizontalAlignment="Right" VerticalAlignment="Center"
-                                FontSize="10" Foreground="#666" Background="Transparent"
-                                BorderThickness="0" Cursor="Hand" Padding="4,0">
+                                FontSize="12" Foreground="#666" Background="Transparent"
+                                BorderThickness="0" Cursor="Hand" Padding="8,2"
+                                x:Name="CloseDiscoveryBtn">
                             <Button.Style>
                                 <Style TargetType="Button">
                                     <Setter Property="Template">
                                         <Setter.Value>
                                             <ControlTemplate TargetType="Button">
-                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                <Border x:Name="btnBorder" Background="{TemplateBinding Background}"
+                                                        CornerRadius="4" Padding="{TemplateBinding Padding}">
+                                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="btnBorder" Property="Background" Value="#3A3A3A"/>
+                                                        <Setter TargetName="btnBorder" Property="BorderBrush" Value="#4A90D9"/>
+                                                        <Setter TargetName="btnBorder" Property="BorderThickness" Value="1"/>
+                                                        <Setter Property="Foreground" Value="#AAA"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
                                             </ControlTemplate>
                                         </Setter.Value>
                                     </Setter>
-                                    <Style.Triggers>
-                                        <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter Property="Foreground" Value="#AAA"/>
-                                        </Trigger>
-                                    </Style.Triggers>
                                 </Style>
                             </Button.Style>
                         </Button>
@@ -720,33 +754,34 @@
                                   HorizontalContentAlignment="Center">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Background="#2D2D2D" CornerRadius="6" Padding="10,6" Margin="0,0,0,4"
-                                        Cursor="Hand" MouseLeftButtonDown="NM2Device_Click"
-                                        BorderBrush="#3D3D3D" BorderThickness="1" MinWidth="180">
-                                    <Border.Style>
-                                        <Style TargetType="Border">
-                                            <Style.Triggers>
-                                                <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter Property="Background" Value="#353535"/>
-                                                    <Setter Property="BorderBrush" Value="#4A90D9"/>
-                                                </Trigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Border.Style>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel Grid.Column="0">
-                                            <TextBlock Text="{Binding Name}" Foreground="#E0E0E0" FontSize="11"/>
-                                            <TextBlock Foreground="#777" FontSize="9" Margin="0,2,0,0">
-                                                <Run Text="{Binding Host}"/>:<Run Text="{Binding Port}"/>
-                                            </TextBlock>
-                                        </StackPanel>
-                                        <TextBlock Grid.Column="1" Text="连接" Foreground="#4A90D9" FontSize="10" VerticalAlignment="Center" FontWeight="Medium"/>
-                                    </Grid>
-                                </Border>
+                                <Grid Margin="0,0,0,4">
+                                    <Border x:Name="DeviceGlow" Background="Transparent" CornerRadius="8"
+                                            BorderThickness="2" BorderBrush="Transparent"
+                                            Opacity="0" IsHitTestVisible="False">
+                                        <Border.Effect>
+                                            <DropShadowEffect Color="#4A90D9" BlurRadius="12" ShadowDepth="0" Opacity="0.5"/>
+                                        </Border.Effect>
+                                    </Border>
+                                    <Border Background="#2D2D2D" CornerRadius="6" Padding="10,6" MinWidth="180"
+                                            Cursor="Hand" MouseLeftButtonDown="NM2Device_Click"
+                                            BorderBrush="#3D3D3D" BorderThickness="1"
+                                            MouseEnter="NM2Device_MouseEnter"
+                                            MouseLeave="NM2Device_MouseLeave">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0">
+                                                <TextBlock Text="{Binding Name}" Foreground="#E0E0E0" FontSize="11"/>
+                                                <TextBlock Foreground="#777" FontSize="9" Margin="0,2,0,0">
+                                                    <Run Text="{Binding Host}"/>:<Run Text="{Binding Port}"/>
+                                                </TextBlock>
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1" Text="连接" Foreground="#4A90D9" FontSize="10" VerticalAlignment="Center" FontWeight="Medium"/>
+                                        </Grid>
+                                    </Border>
+                                </Grid>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -754,7 +789,6 @@
             </Border>
         </Grid>
 
-        <!-- 底部状态栏 -->
         <StatusBar Grid.Row="3" Background="{StaticResource HeaderBg}" Padding="10,5" BorderBrush="#2A2A2A" BorderThickness="0,1,0,0">
             <StatusBarItem>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
