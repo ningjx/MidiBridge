@@ -6,7 +6,7 @@ namespace Test.Tests.RtpMidi;
 
 public static class RtpMidiTests
 {
-    public static async Task ServerTest()
+    public static Task ServerTest()
     {
         Console.WriteLine("\n--- RTP-MIDI 服务端测试 ---");
         Console.Write("控制端口 (默认 5004): ");
@@ -20,12 +20,13 @@ public static class RtpMidiTests
         if (!server.Start(controlPort))
         {
             Console.WriteLine("启动失败");
-            return;
+            return Task.CompletedTask;
         }
 
         Console.WriteLine("按任意键停止服务");
         Console.ReadKey(true);
         server.Stop();
+        return Task.CompletedTask;
     }
 
     public static async Task ClientTest()
