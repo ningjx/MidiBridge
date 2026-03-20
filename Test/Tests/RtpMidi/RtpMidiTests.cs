@@ -453,9 +453,12 @@ public class RtpMidiTestClient : IDisposable
             _remoteControlEP = new IPEndPoint(ip, controlPort);
             _remoteDataEP = new IPEndPoint(ip, controlPort + 1);
 
-            _controlClient = new UdpClient();
-            _dataClient = new UdpClient();
+            _controlClient = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
+            _dataClient = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
             _cts = new CancellationTokenSource();
+
+            OnLog?.Invoke($"本地控制端口: {((IPEndPoint)_controlClient.Client.LocalEndPoint).Port}");
+            OnLog?.Invoke($"本地数据端口: {((IPEndPoint)_dataClient.Client.LocalEndPoint).Port}");
 
             Task.Run(() => ControlLoop(_cts.Token));
             Task.Run(() => DataLoop(_cts.Token));
