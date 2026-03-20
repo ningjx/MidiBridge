@@ -354,27 +354,44 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
     private string ReadName(byte[] data, ref int offset)
     {
         var sb = new StringBuilder();
-        int originalOffset = offset;
+        int returnOffset = -1;
+        int maxJumps = 10;
+        int jumps = 0;
 
         while (offset < data.Length)
         {
-            byte len = data[offset++];
+            byte len = data[offset];
 
-            if (len == 0) break;
+            if (len == 0)
+            {
+                offset++;
+                break;
+            }
 
             if ((len & 0xC0) == 0xC0)
             {
-                if (offset >= data.Length) break;
-                int pointer = ((len & 0x3F) << 8) | data[offset++];
+                if (offset + 1 >= data.Length) break;
+                if (returnOffset < 0)
+                {
+                    returnOffset = offset + 2;
+                }
+                int pointer = ((len & 0x3F) << 8) | data[offset + 1];
                 offset = pointer;
+                if (++jumps > maxJumps) break;
                 continue;
             }
 
+            offset++;
             if (offset + len > data.Length) break;
 
             if (sb.Length > 0) sb.Append('.');
             sb.Append(Encoding.UTF8.GetString(data, offset, len));
             offset += len;
+        }
+
+        if (returnOffset >= 0)
+        {
+            offset = returnOffset;
         }
 
         return sb.ToString();

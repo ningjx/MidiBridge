@@ -133,6 +133,7 @@ public class NM2DiscoverableServer : IDisposable
     private void SendMdnsResponse(IPEndPoint remoteEP)
     {
         var serviceName = $"{_serviceName}._midi2._udp.local";
+        var hostName = $"{Environment.MachineName.ToLower()}.local";
         var txtEntry = $"productInstanceId={_productId}";
         var txtBytes = Encoding.UTF8.GetBytes(txtEntry);
         var localIP = GetLocalIPAddress();
@@ -149,19 +150,20 @@ public class NM2DiscoverableServer : IDisposable
         writer.Write((byte)0x00); writer.Write((byte)0x00);
         writer.Write((byte)0x00); writer.Write((byte)0x00);
 
-        ushort srvLen = 7;
         WriteMdnsName(writer, serviceName);
         writer.Write((byte)0x00); writer.Write((byte)0x21);
         writer.Write((byte)0x00); writer.Write((byte)0x01);
         writer.Write((byte)(ttl >> 24)); writer.Write((byte)(ttl >> 16));
         writer.Write((byte)(ttl >> 8)); writer.Write((byte)ttl);
+        var hostNameBytes = Encoding.UTF8.GetBytes(hostName);
+        ushort srvLen = (ushort)(6 + hostNameBytes.Length + 1);
         writer.Write((byte)(srvLen >> 8)); writer.Write((byte)srvLen);
         writer.Write((byte)0x00); writer.Write((byte)0x00);
         writer.Write((byte)0x00); writer.Write((byte)0x00);
         writer.Write((byte)(_port >> 8)); writer.Write((byte)_port);
-        writer.Write((byte)0x00);
+        WriteMdnsName(writer, hostName);
 
-        WriteMdnsName(writer, serviceName);
+        WriteMdnsName(writer, hostName);
         writer.Write((byte)0x00); writer.Write((byte)0x01);
         writer.Write((byte)0x00); writer.Write((byte)0x01);
         writer.Write((byte)(ttl >> 24)); writer.Write((byte)(ttl >> 16));
@@ -202,6 +204,7 @@ public class NM2DiscoverableServer : IDisposable
     private byte[] CreateMdnsAnnouncement()
     {
         var serviceName = $"{_serviceName}._midi2._udp.local";
+        var hostName = $"{Environment.MachineName.ToLower()}.local";
         var txtEntry = $"productInstanceId={_productId}";
         var txtBytes = Encoding.UTF8.GetBytes(txtEntry);
         var localIP = GetLocalIPAddress();
@@ -218,19 +221,20 @@ public class NM2DiscoverableServer : IDisposable
         writer.Write((byte)0x00); writer.Write((byte)0x00);
         writer.Write((byte)0x00); writer.Write((byte)0x00);
 
-        ushort srvLen = 7;
         WriteMdnsName(writer, serviceName);
         writer.Write((byte)0x00); writer.Write((byte)0x21);
         writer.Write((byte)0x00); writer.Write((byte)0x01);
         writer.Write((byte)(ttl >> 24)); writer.Write((byte)(ttl >> 16));
         writer.Write((byte)(ttl >> 8)); writer.Write((byte)ttl);
+        var hostNameBytes = Encoding.UTF8.GetBytes(hostName);
+        ushort srvLen = (ushort)(6 + hostNameBytes.Length + 1);
         writer.Write((byte)(srvLen >> 8)); writer.Write((byte)srvLen);
         writer.Write((byte)0x00); writer.Write((byte)0x00);
         writer.Write((byte)0x00); writer.Write((byte)0x00);
         writer.Write((byte)(_port >> 8)); writer.Write((byte)_port);
-        writer.Write((byte)0x00);
+        WriteMdnsName(writer, hostName);
 
-        WriteMdnsName(writer, serviceName);
+        WriteMdnsName(writer, hostName);
         writer.Write((byte)0x00); writer.Write((byte)0x01);
         writer.Write((byte)0x00); writer.Write((byte)0x01);
         writer.Write((byte)(ttl >> 24)); writer.Write((byte)(ttl >> 16));
