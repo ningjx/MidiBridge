@@ -154,28 +154,38 @@ public class RtpMidiTestServer : IDisposable
 
     private async void HeartbeatLoop(CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested)
+        try
         {
-            await Task.Delay(HEARTBEAT_INTERVAL_MS, ct);
-            if (_remoteControlEP != null)
+            while (!ct.IsCancellationRequested)
             {
-                SendCk(_remoteControlEP);
+                await Task.Delay(HEARTBEAT_INTERVAL_MS, ct);
+                if (_remoteControlEP != null)
+                {
+                    SendCk(_remoteControlEP);
+                }
             }
         }
+        catch (OperationCanceledException) { }
+        catch { }
     }
 
     private async void TimeoutCheckLoop(CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested)
+        try
         {
-            await Task.Delay(5000, ct);
-            if (_remoteControlEP != null && (DateTime.Now - _lastReceiveTime).TotalSeconds > 60)
+            while (!ct.IsCancellationRequested)
             {
-                OnLog?.Invoke("对端超时，断开连接");
-                _remoteControlEP = null;
-                _remoteDataEP = null;
+                await Task.Delay(5000, ct);
+                if (_remoteControlEP != null && (DateTime.Now - _lastReceiveTime).TotalSeconds > 60)
+                {
+                    OnLog?.Invoke("对端超时，断开连接");
+                    _remoteControlEP = null;
+                    _remoteDataEP = null;
+                }
             }
         }
+        catch (OperationCanceledException) { }
+        catch { }
     }
 
     private void ProcessControlPacket(byte[] data, IPEndPoint remoteEP)
@@ -515,28 +525,38 @@ public class RtpMidiTestClient : IDisposable
 
     private async void HeartbeatLoop(CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested)
+        try
         {
-            await Task.Delay(HEARTBEAT_INTERVAL_MS, ct);
-            if (_remoteControlEP != null)
+            while (!ct.IsCancellationRequested)
             {
-                SendCk(_remoteControlEP);
+                await Task.Delay(HEARTBEAT_INTERVAL_MS, ct);
+                if (_remoteControlEP != null)
+                {
+                    SendCk(_remoteControlEP);
+                }
             }
         }
+        catch (OperationCanceledException) { }
+        catch { }
     }
 
     private async void TimeoutCheckLoop(CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested)
+        try
         {
-            await Task.Delay(5000, ct);
-            if (_remoteControlEP != null && (DateTime.Now - _lastReceiveTime).TotalSeconds > 60)
+            while (!ct.IsCancellationRequested)
             {
-                OnLog?.Invoke("对端超时，断开连接");
-                _remoteControlEP = null;
-                _remoteDataEP = null;
+                await Task.Delay(5000, ct);
+                if (_remoteControlEP != null && (DateTime.Now - _lastReceiveTime).TotalSeconds > 60)
+                {
+                    OnLog?.Invoke("对端超时，断开连接");
+                    _remoteControlEP = null;
+                    _remoteDataEP = null;
+                }
             }
         }
+        catch (OperationCanceledException) { }
+        catch { }
     }
 
     private void ProcessControlPacket(byte[] data, IPEndPoint remoteEP)
