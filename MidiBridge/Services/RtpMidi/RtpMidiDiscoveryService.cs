@@ -6,7 +6,7 @@ using System.Text;
 using MidiBridge.Models;
 using Serilog;
 
-namespace MidiBridge.Services;
+namespace MidiBridge.Services.RtpMidi;
 
 public class RtpMidiDiscoveryService : IDisposable
 {

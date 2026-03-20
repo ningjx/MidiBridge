@@ -5,6 +5,7 @@ using MidiBridge.Models;
 using MidiBridge.Services;
 using MidiBridge.Services.Interfaces;
 using MidiBridge.Services.NetworkMidi2;
+using MidiBridge.Services.RtpMidi;
 using Serilog;
 
 namespace MidiBridge.ViewModels;

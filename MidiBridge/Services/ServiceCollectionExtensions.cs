@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using MidiBridge.Services.Interfaces;
 using MidiBridge.Services.NetworkMidi2;
+using MidiBridge.Services.RtpMidi;
 using MidiBridge.ViewModels;
 
 namespace MidiBridge.Services;

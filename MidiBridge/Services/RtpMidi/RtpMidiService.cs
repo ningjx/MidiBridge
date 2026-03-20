@@ -5,10 +5,9 @@ using System.Net.Sockets;
 using System.Text;
 using MidiBridge.Models;
 using MidiBridge.Services.Interfaces;
-using MidiBridge.Services.RtpMidi;
 using Serilog;
 
-namespace MidiBridge.Services;
+namespace MidiBridge.Services.RtpMidi;
 
 public class RtpMidiService : IRtpMidiService
 {
