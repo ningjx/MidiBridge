@@ -3,7 +3,7 @@ using System.Net.Sockets;
 using System.Text;
 using MidiBridge.Services.NetworkMidi2;
 
-namespace Test;
+namespace Test.Tests.NetworkMidi2;
 
 public class NetworkMidi2Server : IDisposable
 {
