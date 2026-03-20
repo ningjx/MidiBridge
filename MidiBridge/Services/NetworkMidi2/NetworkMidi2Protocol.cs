@@ -10,11 +10,11 @@ public static class NetworkMidi2Protocol
     public const int DEFAULT_PORT = 5506;
     public const int MAX_UDP_PACKET_SIZE = 1400;
     public const int MAX_PAYLOAD_WORDS = 64;
-    public const int SESSION_TIMEOUT_MS = 10000;
+    public const int SESSION_TIMEOUT_MS = 30000;
     public const int INVITATION_RETRY_COUNT = 3;
     public const int INVITATION_RETRY_INTERVAL_MS = 500;
-    public const int PING_INTERVAL_MS = 5000;
-    public const int PING_TIMEOUT_COUNT = 3;
+    public const int PING_INTERVAL_MS = 10000;
+    public const int PING_TIMEOUT_COUNT = 5;
 
     public const int FEC_REDUNDANCY = 2;
     public const int IDLE_FIRST_INTERVAL_MS = 300;
