@@ -9,7 +9,7 @@ public static class TransmitIndicatorManager
     private const int FLASH_INTERVAL_MS = 50;
     private const int STATS_UPDATE_INTERVAL_MS = 100;
 
-    private static readonly ConcurrentDictionary<object, byte> s_activeIndicators = new();
+    private static readonly ConcurrentDictionary<object, long> s_lastPulseTime = new();
     private static readonly ConcurrentDictionary<MidiDevice, long> s_pendingReceived = new();
     private static readonly ConcurrentDictionary<MidiDevice, long> s_pendingSent = new();
     private static readonly ConcurrentDictionary<MidiRoute, long> s_pendingTransferred = new();
@@ -52,14 +52,14 @@ public static class TransmitIndicatorManager
     {
         if (target == null) return;
 
-        s_activeIndicators.TryAdd(target, 1);
+        s_lastPulseTime[target] = Environment.TickCount64;
 
         SetTransmitting(target, true);
     }
 
     public static void Remove(object target)
     {
-        s_activeIndicators.TryRemove(target, out _);
+        s_lastPulseTime.TryRemove(target, out _);
 
         if (target is MidiDevice device)
         {
@@ -89,16 +89,23 @@ public static class TransmitIndicatorManager
 
     private static void OnFlashTimerElapsed(object? sender, System.Timers.ElapsedEventArgs e)
     {
-        if (s_activeIndicators.IsEmpty) return;
+        if (s_lastPulseTime.IsEmpty) return;
 
-        var keys = s_activeIndicators.Keys.ToArray();
-        s_activeIndicators.Clear();
+        var keys = s_lastPulseTime.Keys.ToArray();
+        var timerTime = Environment.TickCount64;
 
         s_dispatcher.BeginInvoke(() =>
         {
             foreach (var key in keys)
             {
-                SetTransmitting(key, false);
+                if (s_lastPulseTime.TryGetValue(key, out var lastPulse))
+                {
+                    if (lastPulse <= timerTime)
+                    {
+                        SetTransmitting(key, false);
+                        s_lastPulseTime.TryRemove(key, out _);
+                    }
+                }
             }
         }, DispatcherPriority.Background);
     }
@@ -145,8 +152,8 @@ public static class TransmitIndicatorManager
 
     private static void ClearAll()
     {
-        var keys = s_activeIndicators.Keys.ToArray();
-        s_activeIndicators.Clear();
+        var keys = s_lastPulseTime.Keys.ToArray();
+        s_lastPulseTime.Clear();
 
         s_dispatcher.BeginInvoke(() =>
         {
