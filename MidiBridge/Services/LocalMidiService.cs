@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using MidiBridge.Models;
 using MidiBridge.Services.Interfaces;
@@ -205,35 +206,56 @@ public class LocalMidiService : ILocalMidiService
 
         if (e.MidiEvent is SysexEvent)
         {
-            data = Array.Empty<byte>();
+            return;
+        }
+
+        int msg = e.MidiEvent.GetAsShortMessage();
+        if (msg == 0) return;
+
+        byte status = (byte)(msg & 0xFF);
+        byte data1 = (byte)((msg >> 8) & 0xFF);
+        byte data2 = (byte)((msg >> 16) & 0xFF);
+
+        int length = GetMidiMessageLength(status);
+        if (length == 0) return;
+
+        if (length <= 3)
+        {
+            Span<byte> buffer = stackalloc byte[3];
+            buffer[0] = status;
+            if (length >= 2) buffer[1] = data1;
+            if (length >= 3) buffer[2] = data2;
+            data = buffer.Slice(0, length).ToArray();
         }
         else
         {
-            int msg = e.MidiEvent.GetAsShortMessage();
-            if (msg == 0) return;
-
-            byte status = (byte)(msg & 0xFF);
-            byte data1 = (byte)((msg >> 8) & 0xFF);
-            byte data2 = (byte)((msg >> 16) & 0xFF);
-
-            if (status >= 0xF8)
+            var rented = ArrayPool<byte>.Shared.Rent(length);
+            try
             {
-                data = new byte[] { status };
+                rented[0] = status;
+                if (length >= 2) rented[1] = data1;
+                if (length >= 3) rented[2] = data2;
+                data = new ReadOnlySpan<byte>(rented, 0, length).ToArray();
             }
-            else if (status >= 0xF0 || (status & 0xF0) == 0xC0 || (status & 0xF0) == 0xD0)
+            finally
             {
-                data = new byte[] { status, data1 };
-            }
-            else
-            {
-                data = new byte[] { status, data1, data2 };
+                ArrayPool<byte>.Shared.Return(rented);
             }
         }
 
-        if (data.Length > 0)
+        MidiDataReceived?.Invoke(this, (device, data));
+    }
+
+    private static int GetMidiMessageLength(byte status)
+    {
+        if (status >= 0xF8) return 1;
+        if (status >= 0xF0) return 2;
+        int command = status & 0xF0;
+        return command switch
         {
-            MidiDataReceived?.Invoke(this, (device, data));
-        }
+            0xC0 or 0xD0 => 2,
+            _ => 3
+        };
     }
 
     private void UpdateDeviceStats(MidiDevice device)

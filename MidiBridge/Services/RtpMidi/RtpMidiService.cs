@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Net;
@@ -279,8 +280,17 @@ public class RtpMidiService : IRtpMidiService
             uint checkpointSeq = (uint)Math.Max(0, (int)seq - 10);
             var recoveryJournalData = journal.Encode(checkpointSeq, timestamp);
 
-            var packet = CreateRtpMidiPacket(seq, timestamp, _localSSRC, data, recoveryJournalData);
-            _dataServer.Send(packet, packet.Length, endpoint);
+            int packetLength = CalculatePacketLength(data.Length, recoveryJournalData?.Length ?? 0);
+            byte[] packet = ArrayPool<byte>.Shared.Rent(packetLength);
+            try
+            {
+                int actualLength = WriteRtpMidiPacket(packet, seq, timestamp, _localSSRC, data, recoveryJournalData);
+                _dataServer.Send(packet, actualLength, endpoint);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(packet);
+            }
 
             _deviceLastMidiSent[device.Id] = DateTime.Now;
 
@@ -292,6 +302,41 @@ public class RtpMidiService : IRtpMidiService
         {
             Log.Error(ex, "[RtpMidi] 发送消息失败");
         }
+    }
+
+    private int CalculatePacketLength(int midiDataLength, int journalLength)
+    {
+        int midiListLen = midiDataLength == 0 ? 1 :
+            midiDataLength <= 15 ? 1 + midiDataLength : 2 + midiDataLength;
+        return 12 + midiListLen + journalLength;
+    }
+
+    private int WriteRtpMidiPacket(byte[] packet, ushort sequenceNumber, uint timestamp, uint ssrc, byte[] midiData, byte[]? recoveryJournal)
+    {
+        bool hasJournal = recoveryJournal != null && recoveryJournal.Length > 0;
+
+        int offset = 0;
+
+        packet[offset++] = 0x80;
+        packet[offset++] = 0x61;
+
+        packet[offset++] = (byte)((sequenceNumber >> 8) & 0xFF);
+        packet[offset++] = (byte)(sequenceNumber & 0xFF);
+
+        WriteBigEndianUInt32(packet, offset, timestamp);
+        offset += 4;
+        WriteBigEndianUInt32(packet, offset, ssrc);
+        offset += 4;
+
+        offset = WriteMidiCommandSection(packet, offset, midiData, hasJournal);
+
+        if (hasJournal)
+        {
+            Buffer.BlockCopy(recoveryJournal!, 0, packet, offset, recoveryJournal!.Length);
+            offset += recoveryJournal!.Length;
+        }
+
+        return offset;
     }
 
     private uint GetRtpTimestamp()
@@ -471,8 +516,17 @@ public class RtpMidiService : IRtpMidiService
             uint checkpointSeq = (uint)Math.Max(0, (int)seq - 10);
             var recoveryJournalData = journal.Encode(checkpointSeq, timestamp);
 
-            var packet = CreateRtpMidiPacket(seq, timestamp, _localSSRC, Array.Empty<byte>(), recoveryJournalData);
-            _dataServer.Send(packet, packet.Length, endpoint);
+            int packetLength = CalculatePacketLength(0, recoveryJournalData?.Length ?? 0);
+            byte[] packet = ArrayPool<byte>.Shared.Rent(packetLength);
+            try
+            {
+                int actualLength = WriteRtpMidiPacket(packet, seq, timestamp, _localSSRC, Array.Empty<byte>(), recoveryJournalData);
+                _dataServer.Send(packet, actualLength, endpoint);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(packet);
+            }
 
             _deviceLastMidiSent[device.Id] = DateTime.Now;
             Log.Debug("[RTP] 发送 Guard Packet 到 {Endpoint}", endpoint);
@@ -674,23 +728,36 @@ public class RtpMidiService : IRtpMidiService
             if (journalOffset < data.Length)
             {
                 int journalLength = data.Length - journalOffset;
-                byte[] journalData = new byte[journalLength];
-                Buffer.BlockCopy(data, journalOffset, journalData, 0, journalLength);
-
-                foreach (var cmd in receiver.ProcessRecoveryJournal(journalData, seqNum, expectedSeq))
+                byte[] journalData = ArrayPool<byte>.Shared.Rent(journalLength);
+                try
                 {
-                    MidiDataReceived?.Invoke(this, (device, cmd));
+                    Buffer.BlockCopy(data, journalOffset, journalData, 0, journalLength);
+                    foreach (var cmd in receiver.ProcessRecoveryJournal(journalData.AsSpan(0, journalLength).ToArray(), seqNum, expectedSeq))
+                    {
+                        MidiDataReceived?.Invoke(this, (device, cmd));
+                    }
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(journalData);
                 }
             }
         }
 
         if (midiLength > 0)
         {
-            byte[] midiData = new byte[midiLength];
-            Buffer.BlockCopy(data, offset, midiData, 0, midiLength);
-
-            receiver.UpdateFromReceivedMidi(midiData, seqNum);
-            MidiDataReceived?.Invoke(this, (device, midiData));
+            byte[] midiData = ArrayPool<byte>.Shared.Rent(midiLength);
+            try
+            {
+                Buffer.BlockCopy(data, offset, midiData, 0, midiLength);
+                var midiDataCopy = midiData.AsSpan(0, midiLength).ToArray();
+                receiver.UpdateFromReceivedMidi(midiDataCopy, seqNum);
+                MidiDataReceived?.Invoke(this, (device, midiDataCopy));
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(midiData);
+            }
         }
 
         _deviceExpectedSeq[device.Id] = (ushort)(seqNum + 1);
@@ -707,19 +774,16 @@ public class RtpMidiService : IRtpMidiService
     {
         try
         {
-            var packet = new byte[12];
+            Span<byte> packet = stackalloc byte[12];
             packet[0] = 0xFF;
             packet[1] = 0xFF;
             packet[2] = (byte)'C';
             packet[3] = (byte)'K';
-            WriteBigEndianUInt32(packet, 4, _localSSRC);
-
-            var count = BitConverter.GetBytes(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-            if (BitConverter.IsLittleEndian) Array.Reverse(count);
-            Buffer.BlockCopy(count, 0, packet, 8, 4);
+            WriteBigEndianUInt32Span(packet.Slice(4), _localSSRC);
+            WriteBigEndianInt32Span(packet.Slice(8), (int)(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() & 0xFFFFFFFF));
 
             var controlEP = new IPEndPoint(endpoint.Address, endpoint.Port - 1);
-            _controlServer?.Send(packet, packet.Length, controlEP);
+            _controlServer?.Send(packet.ToArray(), 12, controlEP);
             Log.Debug("[RTP] 发送 CK 到 {RemoteEP}", controlEP);
         }
         catch { }
@@ -775,67 +839,24 @@ private void SendSyncResponse(byte[] data, IPEndPoint remoteEP, bool isDataPort 
                 }
             }
 
-            var packet = new byte[12];
+            Span<byte> packet = stackalloc byte[12];
             packet[0] = 0xFF;
             packet[1] = 0xFF;
             packet[2] = (byte)'C';
             packet[3] = (byte)'K';
-            WriteBigEndianUInt32(packet, 4, _localSSRC);
-
-            var count = BitConverter.GetBytes(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-            if (BitConverter.IsLittleEndian) Array.Reverse(count);
-            Buffer.BlockCopy(count, 0, packet, 8, 4);
+            WriteBigEndianUInt32Span(packet.Slice(4), _localSSRC);
+            WriteBigEndianInt32Span(packet.Slice(8), (int)(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() & 0xFFFFFFFF));
 
             if (isDataPort && _dataServer != null)
             {
-                _dataServer.Send(packet, packet.Length, remoteEP);
+                _dataServer.Send(packet.ToArray(), 12, remoteEP);
             }
             else if (_controlServer != null)
             {
-                _controlServer.Send(packet, packet.Length, remoteEP);
+                _controlServer.Send(packet.ToArray(), 12, remoteEP);
             }
         }
         catch { }
-    }
-
-    private byte[] CreateRtpMidiPacket(ushort sequenceNumber, uint timestamp, uint ssrc, byte[] midiData, byte[]? recoveryJournal = null)
-    {
-        bool hasJournal = recoveryJournal != null && recoveryJournal.Length > 0;
-        int midiListLen = CalculateMidiListLength(midiData);
-        int journalLen = hasJournal ? recoveryJournal!.Length : 0;
-        int packetLen = 12 + midiListLen + journalLen;
-        var packet = new byte[packetLen];
-
-        int offset = 0;
-
-        packet[offset++] = 0x80;
-        packet[offset++] = 0x61;
-
-        packet[offset++] = (byte)((sequenceNumber >> 8) & 0xFF);
-        packet[offset++] = (byte)(sequenceNumber & 0xFF);
-
-        WriteBigEndianUInt32(packet, offset, timestamp);
-        offset += 4;
-        WriteBigEndianUInt32(packet, offset, ssrc);
-        offset += 4;
-
-        offset = WriteMidiCommandSection(packet, offset, midiData, hasJournal);
-
-        if (hasJournal)
-        {
-            Buffer.BlockCopy(recoveryJournal!, 0, packet, offset, recoveryJournal!.Length);
-        }
-
-        return packet;
-    }
-
-    private int CalculateMidiListLength(byte[] midiData)
-    {
-        if (midiData == null || midiData.Length == 0) return 1;
-
-        if (midiData.Length <= 15) return 1 + midiData.Length;
-
-        return 1 + 1 + midiData.Length;
     }
 
     private int WriteMidiCommandSection(byte[] packet, int offset, byte[] midiData, bool hasJournal)
@@ -890,6 +911,22 @@ private void SendSyncResponse(byte[] data, IPEndPoint remoteEP, bool isDataPort 
     private uint ReadBigEndianUInt32(byte[] data, int offset)
     {
         return (uint)((data[offset] << 24) | (data[offset + 1] << 16) | (data[offset + 2] << 8) | data[offset + 3]);
+    }
+
+    private static void WriteBigEndianUInt32Span(Span<byte> buffer, uint value)
+    {
+        buffer[0] = (byte)(value >> 24);
+        buffer[1] = (byte)(value >> 16);
+        buffer[2] = (byte)(value >> 8);
+        buffer[3] = (byte)value;
+    }
+
+    private static void WriteBigEndianInt32Span(Span<byte> buffer, int value)
+    {
+        buffer[0] = (byte)(value >> 24);
+        buffer[1] = (byte)(value >> 16);
+        buffer[2] = (byte)(value >> 8);
+        buffer[3] = (byte)value;
     }
 
     private void OnStatusChanged(string message) => StatusChanged?.Invoke(this, message);
