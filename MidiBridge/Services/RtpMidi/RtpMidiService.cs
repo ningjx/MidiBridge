@@ -303,7 +303,16 @@ public class RtpMidiService : IRtpMidiService
             }
             catch (OperationCanceledException) { break; }
             catch (ObjectDisposedException) { break; }
-            catch (SocketException) { break; }
+            catch (SocketException ex)
+            {
+                if (ct.IsCancellationRequested) break;
+                if (ex.SocketErrorCode == SocketError.ConnectionReset ||
+                    ex.SocketErrorCode == SocketError.ConnectionRefused)
+                {
+                    continue;
+                }
+                break;
+            }
             catch (Exception ex)
             {
                 if (!ct.IsCancellationRequested)
@@ -324,7 +333,16 @@ public class RtpMidiService : IRtpMidiService
             }
             catch (OperationCanceledException) { break; }
             catch (ObjectDisposedException) { break; }
-            catch (SocketException) { break; }
+            catch (SocketException ex)
+            {
+                if (ct.IsCancellationRequested) break;
+                if (ex.SocketErrorCode == SocketError.ConnectionReset ||
+                    ex.SocketErrorCode == SocketError.ConnectionRefused)
+                {
+                    continue;
+                }
+                break;
+            }
             catch (Exception ex)
             {
                 if (!ct.IsCancellationRequested)
@@ -595,7 +613,6 @@ public class RtpMidiService : IRtpMidiService
             _deviceLastActivity[device.Id] = DateTime.Now;
             device.LastActivity = DateTime.Now;
             DeviceUpdated?.Invoke(this, device);
-            Log.Debug("[RTP] 收到 CK from {RemoteEP}", remoteEP);
         }
 
         SendSyncResponse(data, remoteEP, isDataPort);
@@ -731,6 +748,15 @@ private void SendSyncResponse(byte[] data, IPEndPoint remoteEP, bool isDataPort 
     {
         try
         {
+            if (data.Length >= 8)
+            {
+                uint receivedSSRC = ReadBigEndianUInt32(data, 4);
+                if (receivedSSRC == _localSSRC)
+                {
+                    return;
+                }
+            }
+
             var packet = new byte[12];
             packet[0] = 0xFF;
             packet[1] = 0xFF;
@@ -750,7 +776,6 @@ private void SendSyncResponse(byte[] data, IPEndPoint remoteEP, bool isDataPort 
             {
                 _controlServer.Send(packet, packet.Length, remoteEP);
             }
-            Log.Debug("[RTP] 发送 CK Reply 到 {RemoteEP}", remoteEP);
         }
         catch { }
     }
@@ -842,6 +867,11 @@ private void SendSyncResponse(byte[] data, IPEndPoint remoteEP, bool isDataPort 
         data[offset + 1] = (byte)((value >> 16) & 0xFF);
         data[offset + 2] = (byte)((value >> 8) & 0xFF);
         data[offset + 3] = (byte)(value & 0xFF);
+    }
+
+    private uint ReadBigEndianUInt32(byte[] data, int offset)
+    {
+        return (uint)((data[offset] << 24) | (data[offset + 1] << 16) | (data[offset + 2] << 8) | data[offset + 3]);
     }
 
     private void OnStatusChanged(string message) => StatusChanged?.Invoke(this, message);

@@ -248,8 +248,14 @@ public class RtpMidiTestServer : IDisposable
 
     private void HandleCk(byte[] data, IPEndPoint remoteEP)
     {
-        if ((DateTime.Now - _lastCkSent).TotalMilliseconds < 3000)
-            return;
+        if (data.Length >= 8)
+        {
+            uint receivedSSRC = ReadBigEndianUInt32(data, 4);
+            if (receivedSSRC == _localSSRC)
+            {
+                return;
+            }
+        }
         SendCkReply(data, remoteEP);
         OnLog?.Invoke($"CK from {remoteEP}");
     }
@@ -626,8 +632,14 @@ public class RtpMidiTestClient : IDisposable
 
     private void HandleCk(byte[] data, IPEndPoint remoteEP)
     {
-        if ((DateTime.Now - _lastCkSent).TotalMilliseconds < 3000)
-            return;
+        if (data.Length >= 8)
+        {
+            uint receivedSSRC = ReadBigEndianUInt32(data, 4);
+            if (receivedSSRC == _localSSRC)
+            {
+                return;
+            }
+        }
         SendCkReply(data, remoteEP);
     }
 
