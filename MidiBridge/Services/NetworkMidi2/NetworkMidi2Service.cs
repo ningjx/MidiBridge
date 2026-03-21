@@ -22,7 +22,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
     private string _serviceName;
     private string _productInstanceId;
 
-    private readonly ConcurrentDictionary<uint, DateTime> _pendingPings = new();
+    private readonly ConcurrentDictionary<uint, long> _pendingPings = new();
 
     public event EventHandler<MidiDevice>? DeviceAdded;
     public event EventHandler<MidiDevice>? DeviceRemoved;
@@ -559,7 +559,8 @@ public class NetworkMidi2Service : INetworkMidi2Service
         var replyPacket = NetworkMidi2Protocol.CreateInvitationReplyAccepted(_serviceName, _productInstanceId);
         SendPacket(NetworkMidi2Protocol.CreateUDPPacket(replyPacket), remoteEP);
 
-        AddDevice(session);
+        session = AddDevice(session);
+        _sessions[sessionId] = session;
 
         Log.Information("[NM2] 会话已接受: {Name} 来自 {RemoteEP}", name, remoteEP);
     }
@@ -590,12 +591,13 @@ public class NetworkMidi2Service : INetworkMidi2Service
             session.LastPingReceived = DateTime.Now;
             session.RetransmitBuffer = new List<byte[]>();
             session.SupportsRetransmit = true;
-            _sessions[sessionId] = session;
 
             var reply = NetworkMidi2Protocol.CreateInvitationReplyAccepted(_serviceName, _productInstanceId);
             SendPacket(NetworkMidi2Protocol.CreateUDPPacket(reply), ep);
 
-            AddDevice(session);
+            session = AddDevice(session);
+            _sessions[sessionId] = session;
+
             Log.Information("[NM2] 用户确认接受邀请: {Name}", session.RemoteName);
         }
         catch (Exception ex)
@@ -639,9 +641,9 @@ public class NetworkMidi2Service : INetworkMidi2Service
         session.RemoteName = name;
         session.LastActivity = DateTime.Now;
         session.LastPingReceived = DateTime.Now;
-        _sessions[sessionId] = session;
 
-        AddDevice(session);
+        session = AddDevice(session);
+        _sessions[sessionId] = session;
 
         Log.Information("[NM2] 会话已建立: {Name}", name);
     }
@@ -771,15 +773,18 @@ public class NetworkMidi2Service : INetworkMidi2Service
     {
         if (!NetworkMidi2Protocol.ParsePingCommand(payload, out var pingId)) return;
 
-        if (_pendingPings.TryRemove(pingId, out _))
+        if (_pendingPings.TryRemove(pingId, out var sendTime))
         {
+            var rtt = (int)(Environment.TickCount64 - sendTime);
+
             if (_sessions.TryGetValue(sessionId, out var session))
             {
                 session.LastPingReceived = DateTime.Now;
                 session.LastActivity = DateTime.Now;
                 session.PendingPingCount = 0;
                 _sessions[sessionId] = session;
-                Log.Debug("[NM2] 收到 Ping Reply: {PingId}", pingId);
+
+                UpdateDeviceNetworkStats(session, rtt);
             }
         }
     }
@@ -808,8 +813,8 @@ public class NetworkMidi2Service : INetworkMidi2Service
                 ReceiveSequence = sequenceNumber,
                 RetransmitBuffer = new List<byte[]>(),
             };
+            session = AddDevice(session);
             _sessions[sessionId] = session;
-            AddDevice(session);
         }
         else
         {
@@ -822,6 +827,11 @@ public class NetworkMidi2Service : INetworkMidi2Service
         ProcessUMPData(umpData, session);
 
         UpdateDeviceTransmit(session);
+
+        if (session.PacketsLost > 0 || session.PacketsReceived % 20 == 0)
+        {
+            UpdateDeviceNetworkStats(session);
+        }
     }
 
     private void CheckSequenceNumber(ref NetworkMidi2Protocol.SessionInfo session, ushort sequenceNumber)
@@ -1442,7 +1452,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
                             var ep = new IPEndPoint(IPAddress.Parse(session.RemoteHost), session.RemotePort);
                             uint pingId = (uint)Random.Shared.Next();
 
-                            _pendingPings[pingId] = DateTime.Now;
+                            _pendingPings[pingId] = Environment.TickCount64;
 
                             var ping = NetworkMidi2Protocol.CreatePingCommand(pingId);
                             SendPacket(NetworkMidi2Protocol.CreateUDPPacket(ping), ep);
@@ -1637,18 +1647,18 @@ public class NetworkMidi2Service : INetworkMidi2Service
         return $"nm2-{safeName}@{host}";
     }
 
-    private void AddDevice(NetworkMidi2Protocol.SessionInfo session)
+    private NetworkMidi2Protocol.SessionInfo AddDevice(NetworkMidi2Protocol.SessionInfo session)
     {
+        string stableId = GetStableDeviceId(session.RemoteName, session.RemoteHost);
+        session.Id = stableId;
+
         try
         {
             DispatcherService.RunOnUIThread(() =>
             {
-                string stableId = GetStableDeviceId(session.RemoteName, session.RemoteHost);
-
                 var existingDevice = InputDevices.FirstOrDefault(d => d.Id == stableId);
                 if (existingDevice != null)
                 {
-                    session.Id = stableId;
                     return;
                 }
 
@@ -1664,7 +1674,6 @@ public class NetworkMidi2Service : INetworkMidi2Service
                     ConnectedTime = DateTime.Now,
                 };
 
-                session.Id = stableId;
                 InputDevices.Add(device);
                 DeviceAdded?.Invoke(this, device);
             });
@@ -1673,6 +1682,8 @@ public class NetworkMidi2Service : INetworkMidi2Service
         {
             Log.Debug(ex, "[NM2] 添加设备失败");
         }
+
+        return session;
     }
 
     private void RemoveDevice(string sessionId)
@@ -1703,6 +1714,35 @@ public class NetworkMidi2Service : INetworkMidi2Service
             device.PulseTransmit();
             DeviceUpdated?.Invoke(this, device);
         }
+    }
+
+    private void UpdateDeviceNetworkStats(NetworkMidi2Protocol.SessionInfo session, int? rttMs = null)
+    {
+        string stableId = session.Id;
+        if (string.IsNullOrEmpty(stableId))
+        {
+            stableId = GetStableDeviceId(session.RemoteName, session.RemoteHost);
+        }
+
+        DispatcherService.RunOnUIThread(() =>
+        {
+            var device = InputDevices.FirstOrDefault(d => d.Id == stableId);
+            if (device != null)
+            {
+                if (rttMs.HasValue)
+                {
+                    device.LatencyMs = rttMs.Value;
+                }
+
+                device.PacketsLost = session.PacketsLost;
+                device.PacketsReceived = session.PacketsReceived;
+
+                long totalPackets = session.PacketsReceived + session.PacketsLost;
+                device.PacketLossRate = totalPackets > 0
+                    ? (double)session.PacketsLost / totalPackets * 100.0
+                    : 0;
+            }
+        });
     }
 
     private void OnStatusChanged(string message)

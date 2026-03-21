@@ -29,6 +29,12 @@ public class MidiDevice : INotifyPropertyChanged, IDisposable
     private bool _isEnabled = true;
     private long _receivedMessages;
     private long _sentMessages;
+    private int _latencyMs;
+    private bool _latencyMsSet;
+    private double _packetLossRate;
+    private bool _packetLossRateSet;
+    private long _packetsLost;
+    private long _packetsReceived;
 
     public string Id { get; init; } = Guid.NewGuid().ToString();
     public string Name { get; set; } = "Unknown";
@@ -75,6 +81,54 @@ public class MidiDevice : INotifyPropertyChanged, IDisposable
     }
 
     public string EnabledText => IsEnabled ? "禁用" : "启用";
+
+    public int LatencyMs
+    {
+        get => _latencyMs;
+        set { _latencyMs = value; _latencyMsSet = true; OnPropertyChanged(); OnPropertyChanged(nameof(NetworkStatsText)); }
+    }
+
+    public double PacketLossRate
+    {
+        get => _packetLossRate;
+        set { _packetLossRate = value; _packetLossRateSet = true; OnPropertyChanged(); OnPropertyChanged(nameof(NetworkStatsText)); }
+    }
+
+    public long PacketsLost
+    {
+        get => _packetsLost;
+        set { _packetsLost = value; OnPropertyChanged(); }
+    }
+
+    public long PacketsReceived
+    {
+        get => _packetsReceived;
+        set { _packetsReceived = value; OnPropertyChanged(); }
+    }
+
+    public string NetworkStatsText
+    {
+        get
+        {
+            if (!IsNetwork) return "";
+
+            bool hasLatency = _latencyMs >= 0 && _latencyMsSet;
+            bool hasLossRate = _packetLossRate >= 0 && _packetLossRateSet;
+
+            if (!hasLatency && !hasLossRate)
+            {
+                if (Status == MidiDeviceStatus.Connected || Status == MidiDeviceStatus.Active)
+                {
+                    return "...";
+                }
+                return "";
+            }
+
+            if (!hasLossRate) return $"{_latencyMs}ms";
+            if (!hasLatency) return $"{_packetLossRate:F1}%";
+            return $"{_latencyMs}ms {_packetLossRate:F1}%";
+        }
+    }
 
     public void PulseTransmit()
     {

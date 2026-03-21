@@ -479,6 +479,7 @@
                                                       Foreground="#E0E0E0" TextTrimming="CharacterEllipsis"/>
                                             <TextBlock FontSize="10" Foreground="#777" Margin="0,3,0,0">
                                                 <Run Text="{Binding TypeText, Mode=OneWay}"/>
+                                                <Run Text="{Binding NetworkStatsText, Mode=OneWay}" Foreground="#4A90D9"/>
                                             </TextBlock>
                                         </StackPanel>
 
