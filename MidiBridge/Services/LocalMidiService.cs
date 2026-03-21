@@ -195,7 +195,7 @@ public class LocalMidiService : ILocalMidiService
 
     private void OnMidiMessageReceived(MidiDevice device, MidiInMessageEventArgs e)
     {
-        device.ReceivedMessages++;
+        device.IncrementReceived();
         device.LastActivity = DateTime.Now;
         device.Status = MidiDeviceStatus.Active;
         device.PulseTransmit();
@@ -260,7 +260,7 @@ public class LocalMidiService : ILocalMidiService
 
     private void UpdateDeviceStats(MidiDevice device)
     {
-        device.SentMessages++;
+        device.IncrementSent();
         device.LastActivity = DateTime.Now;
         device.PulseTransmit();
     }

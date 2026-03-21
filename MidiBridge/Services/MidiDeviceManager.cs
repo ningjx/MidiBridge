@@ -265,7 +265,7 @@ public class MidiDeviceManager : IMidiDeviceManager
         {
             var sessionId = GetNM2SessionId(target);
             _networkMidi2Service.SendMidiData(sessionId, data);
-            target.SentMessages++;
+            target.IncrementSent();
             target.LastActivity = DateTime.Now;
             target.PulseTransmit();
         }

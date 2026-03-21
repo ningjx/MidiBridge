@@ -315,7 +315,7 @@ public class MidiRouter : IMidiRouter
                 _deviceManager.SendMidiMessage(route.Target, data);
             }
 
-            route.TransferredMessages++;
+            route.IncrementTransferred();
             route.PulseTransmit();
             RouteUpdated?.Invoke(this, route);
         }

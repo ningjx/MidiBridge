@@ -7,6 +7,7 @@ public class MidiRoute : INotifyPropertyChanged
 {
     private bool _isTransmitting;
     private bool _isEnabled = true;
+    private long _transferredMessages;
 
     public string Id { get; init; } = Guid.NewGuid().ToString();
 
@@ -61,7 +62,9 @@ public class MidiRoute : INotifyPropertyChanged
     public bool IsEffectivelyEnabled => IsEnabled && (Source?.IsEnabled ?? true) && (Target?.IsEnabled ?? true);
 
     public DateTime CreatedTime { get; init; } = DateTime.Now;
-    public long TransferredMessages { get; set; }
+
+    public long TransferredMessages => _transferredMessages;
+
     public bool FilterNoteOn { get; set; } = true;
     public bool FilterNoteOff { get; set; } = true;
     public bool FilterControlChange { get; set; } = true;
@@ -90,6 +93,18 @@ public class MidiRoute : INotifyPropertyChanged
         if (_isTransmitting == value) return;
         _isTransmitting = value;
         OnPropertyChanged(nameof(IsTransmitting));
+    }
+
+    internal void AddTransferredMessages(long count)
+    {
+        if (count <= 0) return;
+        _transferredMessages += count;
+        OnPropertyChanged(nameof(TransferredMessages));
+    }
+
+    public void IncrementTransferred()
+    {
+        TransmitIndicatorManager.IncrementTransferred(this);
     }
 
     private void OnDevicePropertyChanged(object? sender, PropertyChangedEventArgs e)

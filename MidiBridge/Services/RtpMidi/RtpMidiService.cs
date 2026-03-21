@@ -294,7 +294,7 @@ public class RtpMidiService : IRtpMidiService
 
             _deviceLastMidiSent[device.Id] = DateTime.Now;
 
-            device.SentMessages++;
+            device.IncrementSent();
             device.LastActivity = DateTime.Now;
             device.PulseTransmit();
         }
@@ -762,7 +762,7 @@ public class RtpMidiService : IRtpMidiService
 
         _deviceExpectedSeq[device.Id] = (ushort)(seqNum + 1);
 
-        device.ReceivedMessages++;
+        device.IncrementReceived();
         device.LastActivity = DateTime.Now;
         device.Status = MidiDeviceStatus.Active;
         device.PulseTransmit();

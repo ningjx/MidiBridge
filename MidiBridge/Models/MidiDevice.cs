@@ -99,16 +99,32 @@ public class MidiDevice : INotifyPropertyChanged, IDisposable
         }
     }
 
-    public long ReceivedMessages
+    public long ReceivedMessages => _receivedMessages;
+
+    public long SentMessages => _sentMessages;
+
+    internal void AddReceivedMessages(long count)
     {
-        get => _receivedMessages;
-        set { _receivedMessages = value; OnPropertyChanged(); }
+        if (count <= 0) return;
+        _receivedMessages += count;
+        OnPropertyChanged(nameof(ReceivedMessages));
     }
 
-    public long SentMessages
+    internal void AddSentMessages(long count)
     {
-        get => _sentMessages;
-        set { _sentMessages = value; OnPropertyChanged(); }
+        if (count <= 0) return;
+        _sentMessages += count;
+        OnPropertyChanged(nameof(SentMessages));
+    }
+
+    public void IncrementReceived()
+    {
+        TransmitIndicatorManager.IncrementReceived(this);
+    }
+
+    public void IncrementSent()
+    {
+        TransmitIndicatorManager.IncrementSent(this);
     }
 
     public bool IsInput => Type == MidiDeviceType.LocalInput || Type == MidiDeviceType.RtpMidi || Type == MidiDeviceType.NetworkMidi2;
