@@ -241,10 +241,19 @@ public class RtpMidiService : IRtpMidiService
         packet[2] = (byte)'I';
         packet[3] = (byte)'N';
 
-        WriteBigEndianUInt32(packet, 4, 2);
-        WriteBigEndianUInt32(packet, 8, _localSSRC);
+        packet[4] = 0x00;
+        packet[5] = 0x02;
+
+        WriteBigEndianUInt32(packet, 6, _localSSRC);
+
+        packet[10] = 0x00;
+        packet[11] = 0x00;
+
         packet[12] = (byte)((nameBytes.Length >> 8) & 0xFF);
         packet[13] = (byte)(nameBytes.Length & 0xFF);
+
+        packet[14] = 0x00;
+        packet[15] = 0x00;
 
         Buffer.BlockCopy(nameBytes, 0, packet, 16, nameBytes.Length);
 
@@ -517,7 +526,7 @@ public class RtpMidiService : IRtpMidiService
     {
         if (data.Length < 16) return;
 
-        uint initiatorSSRC = ((uint)data[4] << 24) | ((uint)data[5] << 16) | ((uint)data[6] << 8) | data[7];
+        uint initiatorSSRC = ReadBigEndianUInt32(data, 6);
 
         int nameLength = (data[12] << 8) | data[13];
         string name = nameLength > 0 && data.Length >= 16 + nameLength
@@ -728,10 +737,19 @@ public class RtpMidiService : IRtpMidiService
             packet[2] = (byte)'O';
             packet[3] = (byte)'K';
 
-            WriteBigEndianUInt32(packet, 4, 2);
-            WriteBigEndianUInt32(packet, 8, initiatorSSRC);
+            packet[4] = 0x00;
+            packet[5] = 0x02;
+
+            WriteBigEndianUInt32(packet, 6, initiatorSSRC);
+
+            packet[10] = 0x00;
+            packet[11] = 0x00;
+
             packet[12] = (byte)((nameBytes.Length >> 8) & 0xFF);
             packet[13] = (byte)(nameBytes.Length & 0xFF);
+
+            packet[14] = 0x00;
+            packet[15] = 0x00;
 
             Buffer.BlockCopy(nameBytes, 0, packet, 16, nameBytes.Length);
 

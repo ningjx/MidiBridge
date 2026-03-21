@@ -216,7 +216,7 @@ public class RtpMidiTestServer : IDisposable
     private void HandleInvitation(byte[] data, IPEndPoint remoteEP)
     {
         if (data.Length < 16) return;
-        _remoteSSRC = ReadBigEndianUInt32(data, 8);
+        _remoteSSRC = ReadBigEndianUInt32(data, 6);
         int nameLen = (data[12] << 8) | data[13];
         string name = nameLen > 0 && data.Length >= 16 + nameLen 
             ? Encoding.ASCII.GetString(data, 16, nameLen) 
@@ -234,7 +234,7 @@ public class RtpMidiTestServer : IDisposable
     private void HandleInvitationAccept(byte[] data, IPEndPoint remoteEP)
     {
         if (data.Length < 16) return;
-        _remoteSSRC = ReadBigEndianUInt32(data, 8);
+        _remoteSSRC = ReadBigEndianUInt32(data, 6);
         int nameLen = (data[12] << 8) | data[13];
         string name = nameLen > 0 && data.Length >= 16 + nameLen
             ? Encoding.ASCII.GetString(data, 16, nameLen)
@@ -314,10 +314,17 @@ public class RtpMidiTestServer : IDisposable
         packet[0] = 0xFF; packet[1] = 0xFF;
         packet[2] = (byte)'O'; packet[3] = (byte)'K';
 
-        WriteBigEndianUInt32(packet, 4, 2);
-        WriteBigEndianUInt32(packet, 8, _remoteSSRC);
+        packet[4] = 0x00; packet[5] = 0x02;
+
+        WriteBigEndianUInt32(packet, 6, _remoteSSRC);
+
+        packet[10] = 0x00; packet[11] = 0x00;
+
         packet[12] = (byte)((nameBytes.Length >> 8) & 0xFF);
         packet[13] = (byte)(nameBytes.Length & 0xFF);
+
+        packet[14] = 0x00; packet[15] = 0x00;
+
         Buffer.BlockCopy(nameBytes, 0, packet, 16, nameBytes.Length);
 
         _controlServer?.Send(packet, packet.Length, remoteEP);
@@ -616,7 +623,7 @@ public class RtpMidiTestClient : IDisposable
     private void HandleOk(byte[] data, IPEndPoint remoteEP)
     {
         if (data.Length < 16) return;
-        _remoteSSRC = ReadBigEndianUInt32(data, 8);
+        _remoteSSRC = ReadBigEndianUInt32(data, 6);
         int nameLen = (data[12] << 8) | data[13];
         string name = nameLen > 0 && data.Length >= 16 + nameLen
             ? Encoding.ASCII.GetString(data, 16, nameLen)
@@ -697,10 +704,17 @@ public class RtpMidiTestClient : IDisposable
         packet[0] = 0xFF; packet[1] = 0xFF;
         packet[2] = (byte)'I'; packet[3] = (byte)'N';
 
-        WriteBigEndianUInt32(packet, 4, 2);
-        WriteBigEndianUInt32(packet, 8, _localSSRC);
+        packet[4] = 0x00; packet[5] = 0x02;
+
+        WriteBigEndianUInt32(packet, 6, _localSSRC);
+
+        packet[10] = 0x00; packet[11] = 0x00;
+
         packet[12] = (byte)((nameBytes.Length >> 8) & 0xFF);
         packet[13] = (byte)(nameBytes.Length & 0xFF);
+
+        packet[14] = 0x00; packet[15] = 0x00;
+
         Buffer.BlockCopy(nameBytes, 0, packet, 16, nameBytes.Length);
 
         _controlClient?.Send(packet, packet.Length, _remoteControlEP);
