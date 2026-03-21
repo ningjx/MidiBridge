@@ -7,8 +7,13 @@ namespace Test.Tests.NetworkMidi2;
 
 public class NetworkMidi2Client : IDisposable
 {
-    private UdpClient? _udpClient;
-    private CancellationTokenSource? _cts;
+    private const int HEARTBEAT_INTERVAL_MS = 5000;
+    private const int SESSION_TIMEOUT_MS = 30000;
+    
+    private UdpClient? _discoveryClient;
+    private UdpClient? _dataClient;
+    private CancellationTokenSource? _discoveryCts;
+    private CancellationTokenSource? _dataCts;
     private uint _localSSRC;
     private uint _remoteSSRC;
     private ushort _sendSequence;
@@ -19,11 +24,13 @@ public class NetworkMidi2Client : IDisposable
     private uint _lastPingId;
     private DateTime _lastPingTime;
     private int _pendingPingCount;
+    private DateTime _lastActivity;
+    private bool _isRunning;
     
     public event Action<string>? OnLog;
     public event Action<byte[]>? OnMidiReceived;
     
-    public bool IsConnected => _remoteEP != null;
+    public bool IsConnected => _remoteEP != null && _isRunning;
     public string RemoteName => _remoteName;
     public uint LocalSSRC => _localSSRC;
     public uint RemoteSSRC => _remoteSSRC;
@@ -31,21 +38,22 @@ public class NetworkMidi2Client : IDisposable
     public NetworkMidi2Client()
     {
         _localSSRC = (uint)Random.Shared.Next(1, int.MaxValue);
+        _lastActivity = DateTime.Now;
     }
     
     public void StartDiscovery(int listenPort = 5353)
     {
         try
         {
-            _udpClient = new UdpClient(listenPort);
-            _udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            _discoveryClient = new UdpClient(listenPort);
+            _discoveryClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             
             var multicastAddr = IPAddress.Parse("224.0.0.251");
-            _udpClient.JoinMulticastGroup(multicastAddr);
+            _discoveryClient.JoinMulticastGroup(multicastAddr);
             
-            _cts = new CancellationTokenSource();
+            _discoveryCts = new CancellationTokenSource();
             
-            Task.Run(() => DiscoveryLoop(_cts.Token));
+            Task.Run(() => DiscoveryLoop(_discoveryCts.Token));
             
             Log($"[Discovery] Started listening on port {listenPort}");
         }
@@ -57,13 +65,13 @@ public class NetworkMidi2Client : IDisposable
     
     public void SendDiscoveryQuery()
     {
-        if (_udpClient == null) return;
+        if (_discoveryClient == null) return;
         
         try
         {
             var query = CreateMDNSQuery();
             var multicastEP = new IPEndPoint(IPAddress.Parse("224.0.0.251"), 5353);
-            _udpClient.Send(query, query.Length, multicastEP);
+            _discoveryClient.Send(query, query.Length, multicastEP);
             Log("[Discovery] Sent mDNS query for _midi2._udp");
         }
         catch (Exception ex)
@@ -74,11 +82,11 @@ public class NetworkMidi2Client : IDisposable
     
     private async void DiscoveryLoop(CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested && _udpClient != null)
+        while (!ct.IsCancellationRequested && _discoveryClient != null)
         {
             try
             {
-                var result = await _udpClient.ReceiveAsync();
+                var result = await _discoveryClient.ReceiveAsync();
                 ProcessMDNSPacket(result.Buffer, result.RemoteEndPoint);
             }
             catch (OperationCanceledException) { break; }
@@ -142,12 +150,13 @@ public class NetworkMidi2Client : IDisposable
     
     public async Task<bool> ConnectAsync(string host, int port, string name = "TestClient", string productId = "TestProduct")
     {
-        if (_udpClient == null)
-        {
-            _udpClient = new UdpClient();
-            _cts = new CancellationTokenSource();
-            Task.Run(() => ReceiveLoop(_cts.Token));
-        }
+        _dataClient = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
+        _dataCts = new CancellationTokenSource();
+        _isRunning = true;
+        _lastActivity = DateTime.Now;
+        
+        Task.Run(() => ReceiveLoop(_dataCts.Token));
+        Task.Run(() => HeartbeatLoop(_dataCts.Token));
         
         try
         {
@@ -158,7 +167,7 @@ public class NetworkMidi2Client : IDisposable
             {
                 var invitation = NetworkMidi2Protocol.CreateInvitationCommand(name, productId, NetworkMidi2Protocol.InvitationCapabilities.All);
                 var packet = NetworkMidi2Protocol.CreateUDPPacket(invitation);
-                _udpClient.Send(packet, packet.Length, _remoteEP);
+                _dataClient.Send(packet, packet.Length, _remoteEP);
                 Log($"[NM2] Sent INV to {host}:{port} (attempt {retry + 1})");
                 
                 _remoteSSRC = 0;
@@ -194,12 +203,13 @@ public class NetworkMidi2Client : IDisposable
     
     public async Task<bool> ConnectWithAuthAsync(string host, int port, string name, string productId, string sharedSecret)
     {
-        if (_udpClient == null)
-        {
-            _udpClient = new UdpClient();
-            _cts = new CancellationTokenSource();
-            Task.Run(() => ReceiveLoop(_cts.Token));
-        }
+        _dataClient = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
+        _dataCts = new CancellationTokenSource();
+        _isRunning = true;
+        _lastActivity = DateTime.Now;
+        
+        Task.Run(() => ReceiveLoop(_dataCts.Token));
+        Task.Run(() => HeartbeatLoop(_dataCts.Token));
         
         try
         {
@@ -208,7 +218,7 @@ public class NetworkMidi2Client : IDisposable
             
             var invitation = NetworkMidi2Protocol.CreateInvitationCommand(name, productId, NetworkMidi2Protocol.InvitationCapabilities.SupportsAuth);
             var packet = NetworkMidi2Protocol.CreateUDPPacket(invitation);
-            _udpClient.Send(packet, packet.Length, _remoteEP);
+            _dataClient.Send(packet, packet.Length, _remoteEP);
             Log($"[NM2] Sent INV with auth capability");
             
             _cryptoNonce = "";
@@ -231,7 +241,7 @@ public class NetworkMidi2Client : IDisposable
                     var digest = NetworkMidi2Protocol.ComputeAuthDigest(_cryptoNonce, sharedSecret);
                     var authCmd = NetworkMidi2Protocol.CreateInvitationWithAuth(digest);
                     packet = NetworkMidi2Protocol.CreateUDPPacket(authCmd);
-                    _udpClient.Send(packet, packet.Length, _remoteEP);
+                    _dataClient.Send(packet, packet.Length, _remoteEP);
                     Log($"[NM2] Sent INV_WITH_AUTH");
                     
                     _remoteSSRC = 0;
@@ -265,12 +275,13 @@ public class NetworkMidi2Client : IDisposable
     
     public async Task<bool> ConnectWithUserAuthAsync(string host, int port, string name, string productId, string username, string password)
     {
-        if (_udpClient == null)
-        {
-            _udpClient = new UdpClient();
-            _cts = new CancellationTokenSource();
-            Task.Run(() => ReceiveLoop(_cts.Token));
-        }
+        _dataClient = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
+        _dataCts = new CancellationTokenSource();
+        _isRunning = true;
+        _lastActivity = DateTime.Now;
+        
+        Task.Run(() => ReceiveLoop(_dataCts.Token));
+        Task.Run(() => HeartbeatLoop(_dataCts.Token));
         
         try
         {
@@ -279,7 +290,7 @@ public class NetworkMidi2Client : IDisposable
             
             var invitation = NetworkMidi2Protocol.CreateInvitationCommand(name, productId, NetworkMidi2Protocol.InvitationCapabilities.SupportsUserAuth);
             var packet = NetworkMidi2Protocol.CreateUDPPacket(invitation);
-            _udpClient.Send(packet, packet.Length, _remoteEP);
+            _dataClient.Send(packet, packet.Length, _remoteEP);
             Log($"[NM2] Sent INV with user auth capability");
             
             _cryptoNonce = "";
@@ -302,7 +313,7 @@ public class NetworkMidi2Client : IDisposable
                     var digest = NetworkMidi2Protocol.ComputeUserAuthDigest(_cryptoNonce, username, password);
                     var authCmd = NetworkMidi2Protocol.CreateInvitationWithUserAuth(digest, username);
                     packet = NetworkMidi2Protocol.CreateUDPPacket(authCmd);
-                    _udpClient.Send(packet, packet.Length, _remoteEP);
+                    _dataClient.Send(packet, packet.Length, _remoteEP);
                     Log($"[NM2] Sent INV_WITH_USER_AUTH for user: {username}");
                     
                     _remoteSSRC = 0;
@@ -334,13 +345,62 @@ public class NetworkMidi2Client : IDisposable
         }
     }
     
-    private async void ReceiveLoop(CancellationToken ct)
+    private async void HeartbeatLoop(CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested && _udpClient != null)
+        while (!ct.IsCancellationRequested && _isRunning)
         {
             try
             {
-                var result = await _udpClient.ReceiveAsync();
+                await Task.Delay(HEARTBEAT_INTERVAL_MS, ct);
+                
+                if (_remoteEP == null || _dataClient == null) continue;
+                
+                var inactiveMs = (DateTime.Now - _lastActivity).TotalMilliseconds;
+                
+                if (inactiveMs > SESSION_TIMEOUT_MS)
+                {
+                    Log("[NM2] Session timeout, connection lost");
+                    _remoteEP = null;
+                    _remoteSSRC = 0;
+                    _isRunning = false;
+                    break;
+                }
+                
+                if (inactiveMs > HEARTBEAT_INTERVAL_MS)
+                {
+                    _pendingPingCount++;
+                    if (_pendingPingCount > 3)
+                    {
+                        Log("[NM2] Heartbeat timeout, connection lost");
+                        _remoteEP = null;
+                        _remoteSSRC = 0;
+                        _isRunning = false;
+                        break;
+                    }
+                    SendPing();
+                }
+                else
+                {
+                    _pendingPingCount = 0;
+                }
+            }
+            catch (OperationCanceledException) { break; }
+            catch (Exception ex)
+            {
+                if (!ct.IsCancellationRequested)
+                    Log($"[NM2] Heartbeat error: {ex.Message}");
+            }
+        }
+    }
+    
+    private async void ReceiveLoop(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested && _dataClient != null)
+        {
+            try
+            {
+                var result = await _dataClient.ReceiveAsync();
+                _lastActivity = DateTime.Now;
                 ProcessPacket(result.Buffer, result.RemoteEndPoint);
             }
             catch (OperationCanceledException) { break; }
@@ -373,6 +433,8 @@ public class NetworkMidi2Client : IDisposable
         {
             return;
         }
+        
+        Log($"[NM2] 收到命令: 0x{((byte)cmdCode):X2}, len={payloadLen}");
         
         switch (cmdCode)
         {
@@ -441,6 +503,7 @@ public class NetworkMidi2Client : IDisposable
         
         _remoteSSRC = (uint)Random.Shared.Next(1, int.MaxValue);
         _remoteName = umpEndpointName;
+        _lastActivity = DateTime.Now;
         
         Log($"[NM2] INV_ACCEPTED from remote: {umpEndpointName}, product: {productInstanceId}");
         Log($"[NM2] Session established!");
@@ -472,12 +535,16 @@ public class NetworkMidi2Client : IDisposable
     
     private void ProcessPing(byte[] payload, IPEndPoint remoteEP)
     {
-        if (!NetworkMidi2Protocol.ParsePingCommand(payload, out var pingId)) return;
+        if (!NetworkMidi2Protocol.ParsePingCommand(payload, out var pingId))
+        {
+            Log("[NM2] PING 解析失败");
+            return;
+        }
         
         var replyCmd = NetworkMidi2Protocol.CreatePingReplyCommand(pingId);
         var packet = NetworkMidi2Protocol.CreateUDPPacket(replyCmd);
-        _udpClient?.Send(packet, packet.Length, remoteEP);
-        Log($"[NM2] PING id={pingId}, sent PONG");
+        _dataClient?.Send(packet, packet.Length, remoteEP);
+        Log($"[NM2] 收到 PING id={pingId}, 已发送 PONG");
     }
     
     private void ProcessPingReply(byte[] payload)
@@ -502,19 +569,20 @@ public class NetworkMidi2Client : IDisposable
         
         var replyCmd = NetworkMidi2Protocol.CreateByeReplyCommand();
         var packet = NetworkMidi2Protocol.CreateUDPPacket(replyCmd);
-        _udpClient?.Send(packet, packet.Length, _remoteEP);
+        _dataClient?.Send(packet, packet.Length, _remoteEP);
         
         Log($"[NM2] BYE received, reason: {reason}, message: {textMessage}");
         
         _remoteEP = null;
         _remoteSSRC = 0;
+        _isRunning = false;
     }
     
     private void ProcessSessionReset(IPEndPoint remoteEP)
     {
         var replyCmd = NetworkMidi2Protocol.CreateSessionResetReplyCommand();
         var packet = NetworkMidi2Protocol.CreateUDPPacket(replyCmd);
-        _udpClient?.Send(packet, packet.Length, remoteEP);
+        _dataClient?.Send(packet, packet.Length, remoteEP);
         
         _sendSequence = 0;
         _receiveSequence = 0;
@@ -534,7 +602,7 @@ public class NetworkMidi2Client : IDisposable
         
         var errorCmd = NetworkMidi2Protocol.CreateRetransmitErrorCommand(NetworkMidi2Protocol.RetransmitErrorReason.BufferDoesNotContainSequence, seqNum);
         var packet = NetworkMidi2Protocol.CreateUDPPacket(errorCmd);
-        _udpClient?.Send(packet, packet.Length, _remoteEP);
+        _dataClient?.Send(packet, packet.Length, _remoteEP);
     }
     
     private void ProcessRetransmitError(byte[] payload)
@@ -554,6 +622,11 @@ public class NetworkMidi2Client : IDisposable
             }
         }
         _receiveSequence = (ushort)(sequenceNumber + 1);
+        
+        if (umpData.Length == 0)
+        {
+            return;
+        }
         
         Log($"[NM2] UMP Data seq={sequenceNumber}, {umpData.Length} bytes");
         
@@ -588,7 +661,7 @@ public class NetworkMidi2Client : IDisposable
     
     public void SendMidi(byte[] midiData)
     {
-        if (!IsConnected || _remoteEP == null || _udpClient == null) return;
+        if (!IsConnected || _remoteEP == null || _dataClient == null) return;
         
         byte[] umpData = new byte[8];
         umpData[0] = 0x40;
@@ -642,50 +715,50 @@ public class NetworkMidi2Client : IDisposable
     
     private void SendUMPData(byte[] umpData)
     {
-        if (_remoteEP == null || _udpClient == null) return;
+        if (_remoteEP == null || _dataClient == null) return;
         
         var umpCmd = NetworkMidi2Protocol.CreateUMPDataCommand(_sendSequence++, umpData);
         var packet = NetworkMidi2Protocol.CreateUDPPacket(umpCmd);
-        _udpClient.Send(packet, packet.Length, _remoteEP);
+        _dataClient.Send(packet, packet.Length, _remoteEP);
     }
     
     public void SendPing()
     {
-        if (_remoteEP == null || _udpClient == null) return;
+        if (_remoteEP == null || _dataClient == null) return;
         
         _lastPingId = (uint)Random.Shared.Next();
         _lastPingTime = DateTime.Now;
-        _pendingPingCount++;
         
         var pingCmd = NetworkMidi2Protocol.CreatePingCommand(_lastPingId);
         var packet = NetworkMidi2Protocol.CreateUDPPacket(pingCmd);
-        _udpClient.Send(packet, packet.Length, _remoteEP);
+        _dataClient.Send(packet, packet.Length, _remoteEP);
         Log($"[NM2] Sent PING id={_lastPingId}");
     }
     
     public void SendSessionReset()
     {
-        if (_remoteEP == null || _udpClient == null) return;
+        if (_remoteEP == null || _dataClient == null) return;
         
         var resetCmd = NetworkMidi2Protocol.CreateSessionResetCommand();
         var packet = NetworkMidi2Protocol.CreateUDPPacket(resetCmd);
-        _udpClient.Send(packet, packet.Length, _remoteEP);
+        _dataClient.Send(packet, packet.Length, _remoteEP);
         Log("[NM2] Sent SESSION_RESET");
     }
     
     public void Disconnect()
     {
-        if (_remoteEP != null && _udpClient != null)
+        if (_remoteEP != null && _dataClient != null)
         {
             var byeCmd = NetworkMidi2Protocol.CreateByeCommand(NetworkMidi2Protocol.ByeReason.UserTerminated);
             var packet = NetworkMidi2Protocol.CreateUDPPacket(byeCmd);
-            _udpClient.Send(packet, packet.Length, _remoteEP);
+            _dataClient.Send(packet, packet.Length, _remoteEP);
             Log("[NM2] Sent BYE");
         }
         
         _remoteEP = null;
         _remoteSSRC = 0;
         _remoteName = "";
+        _isRunning = false;
     }
     
     private byte[] CreateMDNSQuery()
@@ -778,9 +851,14 @@ public class NetworkMidi2Client : IDisposable
     public void Dispose()
     {
         Disconnect();
-        _cts?.Cancel();
-        _udpClient?.Close();
-        _udpClient?.Dispose();
-        _cts?.Dispose();
+        _isRunning = false;
+        _discoveryCts?.Cancel();
+        _dataCts?.Cancel();
+        _discoveryClient?.Close();
+        _discoveryClient?.Dispose();
+        _dataClient?.Close();
+        _dataClient?.Dispose();
+        _discoveryCts?.Dispose();
+        _dataCts?.Dispose();
     }
 }

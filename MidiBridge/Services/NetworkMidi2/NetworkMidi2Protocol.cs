@@ -719,9 +719,9 @@ public static class NetworkMidi2Protocol
     {
         pingId = 0;
 
-        if (payload == null || payload.Length < 8) return false;
+        if (payload == null || payload.Length < 4) return false;
 
-        pingId = (uint)((payload[4] << 24) | (payload[5] << 16) | (payload[6] << 8) | payload[7]);
+        pingId = (uint)((payload[0] << 24) | (payload[1] << 16) | (payload[2] << 8) | payload[3]);
         return true;
     }
 

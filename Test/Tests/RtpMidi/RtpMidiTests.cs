@@ -78,6 +78,7 @@ public class RtpMidiTestServer : IDisposable
     private const int SAMPLE_RATE = 44100;
     private const int HEARTBEAT_INTERVAL_MS = 5000;
     private DateTime _lastReceiveTime;
+    private DateTime _lastCkSent = DateTime.MinValue;
 
     public event Action<string>? OnLog;
     public event Action<byte[]>? OnMidiReceived;
@@ -247,6 +248,8 @@ public class RtpMidiTestServer : IDisposable
 
     private void HandleCk(byte[] data, IPEndPoint remoteEP)
     {
+        if ((DateTime.Now - _lastCkSent).TotalMilliseconds < 3000)
+            return;
         SendCkReply(data, remoteEP);
         OnLog?.Invoke($"CK from {remoteEP}");
     }
@@ -316,6 +319,7 @@ public class RtpMidiTestServer : IDisposable
 
     private void SendCk(IPEndPoint remoteEP)
     {
+        _lastCkSent = DateTime.Now;
         var packet = new byte[12];
         packet[0] = 0xFF; packet[1] = 0xFF;
         packet[2] = (byte)'C'; packet[3] = (byte)'K';
@@ -434,6 +438,7 @@ public class RtpMidiTestClient : IDisposable
     private const int SAMPLE_RATE = 44100;
     private const int HEARTBEAT_INTERVAL_MS = 5000;
     private DateTime _lastReceiveTime;
+    private DateTime _lastCkSent = DateTime.MinValue;
 
     public event Action<string>? OnLog;
     public event Action<byte[]>? OnMidiReceived;
@@ -621,6 +626,8 @@ public class RtpMidiTestClient : IDisposable
 
     private void HandleCk(byte[] data, IPEndPoint remoteEP)
     {
+        if ((DateTime.Now - _lastCkSent).TotalMilliseconds < 3000)
+            return;
         SendCkReply(data, remoteEP);
     }
 
@@ -689,6 +696,7 @@ public class RtpMidiTestClient : IDisposable
 
     private void SendCk(IPEndPoint remoteEP)
     {
+        _lastCkSent = DateTime.Now;
         var packet = new byte[12];
         packet[0] = 0xFF; packet[1] = 0xFF;
         packet[2] = (byte)'C'; packet[3] = (byte)'K';

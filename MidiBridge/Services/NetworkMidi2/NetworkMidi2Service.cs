@@ -520,6 +520,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
     private void AcceptSession(string sessionId, string name, IPEndPoint remoteEP, NetworkMidi2Protocol.InvitationCapabilities capabilities)
     {
+        var now = DateTime.Now;
         var session = new NetworkMidi2Protocol.SessionInfo
         {
             Id = sessionId,
@@ -527,9 +528,11 @@ public class NetworkMidi2Service : INetworkMidi2Service
             RemoteHost = remoteEP.Address.ToString(),
             RemotePort = remoteEP.Port,
             State = NetworkMidi2Protocol.SessionState.Established,
-            LastActivity = DateTime.Now,
+            LastActivity = now,
             LastPingSent = DateTime.MinValue,
-            LastPingReceived = DateTime.Now,
+            LastPingReceived = now,
+            LastDataSent = now,
+            IdleIntervalMs = NetworkMidi2Protocol.IDLE_FIRST_INTERVAL_MS,
             PendingPingCount = 0,
             SendSequence = 0,
             ReceiveSequence = 0,
@@ -747,7 +750,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
         {
             var reply = NetworkMidi2Protocol.CreatePingReplyCommand(pingId);
             SendPacket(NetworkMidi2Protocol.CreateUDPPacket(reply), remoteEP);
-            Log.Debug("[NM2] Ping -> Pong: {PingId}", pingId);
+            Log.Information("[NM2] 收到 Ping -> 发送 Pong: {PingId} -> {RemoteEP}", pingId, remoteEP);
         }
     }
 
@@ -760,6 +763,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
             if (_sessions.TryGetValue(sessionId, out var session))
             {
                 session.LastPingReceived = DateTime.Now;
+                session.LastActivity = DateTime.Now;
                 session.PendingPingCount = 0;
                 _sessions[sessionId] = session;
                 Log.Debug("[NM2] 收到 Ping Reply: {PingId}", pingId);
@@ -774,6 +778,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
         if (!_sessions.TryGetValue(sessionId, out var session))
         {
+            var now = DateTime.Now;
             session = new NetworkMidi2Protocol.SessionInfo
             {
                 Id = sessionId,
@@ -781,8 +786,11 @@ public class NetworkMidi2Service : INetworkMidi2Service
                 RemoteHost = remoteEP.Address.ToString(),
                 RemotePort = remoteEP.Port,
                 State = NetworkMidi2Protocol.SessionState.Established,
-                LastActivity = DateTime.Now,
-                LastPingReceived = DateTime.Now,
+                LastActivity = now,
+                LastPingReceived = now,
+                LastDataSent = now,
+                IdleIntervalMs = NetworkMidi2Protocol.IDLE_FIRST_INTERVAL_MS,
+                PendingPingCount = 0,
                 SendSequence = 0,
                 ReceiveSequence = sequenceNumber,
                 RetransmitBuffer = new List<byte[]>(),
@@ -1321,9 +1329,9 @@ public class NetworkMidi2Service : INetworkMidi2Service
         return packets.ToArray();
     }
 
-    private void SendZeroLengthData(NetworkMidi2Protocol.SessionInfo session)
+    private NetworkMidi2Protocol.SessionInfo SendZeroLengthData(NetworkMidi2Protocol.SessionInfo session)
     {
-        if (session.State != NetworkMidi2Protocol.SessionState.Established) return;
+        if (session.State != NetworkMidi2Protocol.SessionState.Established) return session;
 
         var ep = new IPEndPoint(IPAddress.Parse(session.RemoteHost), session.RemotePort);
 
@@ -1337,9 +1345,14 @@ public class NetworkMidi2Service : INetworkMidi2Service
         var fecPackets = BuildFEPackets(session, cmd);
         SendPacket(NetworkMidi2Protocol.CreateUDPPacket(fecPackets), ep);
 
-        _sessions[session.Id] = session;
+        if (session.IdleIntervalMs < NetworkMidi2Protocol.IDLE_MAX_INTERVAL_MS)
+        {
+            session.IdleIntervalMs = Math.Min(
+                session.IdleIntervalMs * 2,
+                NetworkMidi2Protocol.IDLE_MAX_INTERVAL_MS);
+        }
 
-        Log.Debug("[NM2] 发送 Zero Length Data: Seq={Seq}", session.SendSequence);
+        return session;
     }
 
     private void UpdateRetransmitBuffer(NetworkMidi2Protocol.SessionInfo session, byte[] cmd)
@@ -1509,12 +1522,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
                     if (idleMs >= session.IdleIntervalMs)
                     {
-                        SendZeroLengthData(session);
-
-                        session.IdleIntervalMs = Math.Min(
-                            session.IdleIntervalMs * 2,
-                            NetworkMidi2Protocol.IDLE_MAX_INTERVAL_MS);
-
+                        session = SendZeroLengthData(session);
                         _sessions[kvp.Key] = session;
                     }
                 }
