@@ -45,8 +45,14 @@ public class NetworkMidi2Client : IDisposable
     {
         try
         {
-            _discoveryClient = new UdpClient(listenPort);
+            _discoveryClient?.Close();
+            _discoveryClient?.Dispose();
+            _discoveryCts?.Cancel();
+            _discoveryCts?.Dispose();
+            
+            _discoveryClient = new UdpClient();
             _discoveryClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            _discoveryClient.Client.Bind(new IPEndPoint(IPAddress.Any, listenPort));
             
             var multicastAddr = IPAddress.Parse("224.0.0.251");
             _discoveryClient.JoinMulticastGroup(multicastAddr);
@@ -150,10 +156,23 @@ public class NetworkMidi2Client : IDisposable
     
     public async Task<bool> ConnectAsync(string host, int port, string name = "TestClient", string productId = "TestProduct")
     {
+        if (_dataClient != null)
+        {
+            _isRunning = false;
+            _dataCts?.Cancel();
+            _dataClient?.Close();
+            _dataClient?.Dispose();
+            _dataClient = null;
+            await Task.Delay(100);
+        }
+        
         _dataClient = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
         _dataCts = new CancellationTokenSource();
         _isRunning = true;
         _lastActivity = DateTime.Now;
+        _sendSequence = 0;
+        _receiveSequence = 0;
+        _pendingPingCount = 0;
         
         Task.Run(() => ReceiveLoop(_dataCts.Token));
         Task.Run(() => HeartbeatLoop(_dataCts.Token));
@@ -749,16 +768,30 @@ public class NetworkMidi2Client : IDisposable
     {
         if (_remoteEP != null && _dataClient != null)
         {
-            var byeCmd = NetworkMidi2Protocol.CreateByeCommand(NetworkMidi2Protocol.ByeReason.UserTerminated);
-            var packet = NetworkMidi2Protocol.CreateUDPPacket(byeCmd);
-            _dataClient.Send(packet, packet.Length, _remoteEP);
-            Log("[NM2] Sent BYE");
+            try
+            {
+                var byeCmd = NetworkMidi2Protocol.CreateByeCommand(NetworkMidi2Protocol.ByeReason.UserTerminated);
+                var packet = NetworkMidi2Protocol.CreateUDPPacket(byeCmd);
+                _dataClient.Send(packet, packet.Length, _remoteEP);
+                Log("[NM2] Sent BYE");
+            }
+            catch { }
         }
+        
+        _isRunning = false;
+        _dataCts?.Cancel();
+        _dataClient?.Close();
+        _dataClient?.Dispose();
+        _dataClient = null;
+        _dataCts?.Dispose();
+        _dataCts = null;
         
         _remoteEP = null;
         _remoteSSRC = 0;
         _remoteName = "";
-        _isRunning = false;
+        _sendSequence = 0;
+        _receiveSequence = 0;
+        _pendingPingCount = 0;
     }
     
     private byte[] CreateMDNSQuery()
@@ -848,17 +881,20 @@ public class NetworkMidi2Client : IDisposable
         OnLog?.Invoke(message);
     }
     
+    public void StopDiscovery()
+    {
+        _discoveryCts?.Cancel();
+        _discoveryClient?.Close();
+        _discoveryClient?.Dispose();
+        _discoveryClient = null;
+        _discoveryCts?.Dispose();
+        _discoveryCts = null;
+    }
+    
     public void Dispose()
     {
         Disconnect();
+        StopDiscovery();
         _isRunning = false;
-        _discoveryCts?.Cancel();
-        _dataCts?.Cancel();
-        _discoveryClient?.Close();
-        _discoveryClient?.Dispose();
-        _dataClient?.Close();
-        _dataClient?.Dispose();
-        _discoveryCts?.Dispose();
-        _dataCts?.Dispose();
     }
 }

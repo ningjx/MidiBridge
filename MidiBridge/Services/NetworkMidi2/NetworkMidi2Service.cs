@@ -129,11 +129,24 @@ public class NetworkMidi2Service : INetworkMidi2Service
             try
             {
                 var result = await _udpServer.ReceiveAsync();
-                ProcessPacket(result.Buffer, result.RemoteEndPoint);
+                if (result.Buffer.Length > 0)
+                {
+                    ProcessPacket(result.Buffer, result.RemoteEndPoint);
+                }
             }
             catch (OperationCanceledException) { break; }
             catch (ObjectDisposedException) { break; }
-            catch (SocketException) { break; }
+            catch (SocketException ex)
+            {
+                if (ct.IsCancellationRequested) break;
+                if (ex.SocketErrorCode == SocketError.ConnectionReset ||
+                    ex.SocketErrorCode == SocketError.ConnectionRefused)
+                {
+                    continue;
+                }
+                Log.Debug("[NM2] Socket 错误: {Error}", ex.SocketErrorCode);
+                break;
+            }
             catch (Exception ex)
             {
                 if (!ct.IsCancellationRequested)
