@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using Timer = System.Timers.Timer;
 
 namespace MidiBridge.Models;
 
@@ -8,17 +7,6 @@ public class MidiRoute : INotifyPropertyChanged
 {
     private bool _isTransmitting;
     private bool _isEnabled = true;
-    private readonly Timer _transmitTimer;
-
-    public MidiRoute()
-    {
-        _transmitTimer = new Timer(100);
-        _transmitTimer.Elapsed += (s, e) =>
-        {
-            SetTransmitting(false);
-            _transmitTimer.Stop();
-        };
-    }
 
     public string Id { get; init; } = Guid.NewGuid().ToString();
 
@@ -94,12 +82,10 @@ public class MidiRoute : INotifyPropertyChanged
 
     public void PulseTransmit()
     {
-        SetTransmitting(true);
-        _transmitTimer.Stop();
-        _transmitTimer.Start();
+        TransmitIndicatorManager.Pulse(this);
     }
 
-    private void SetTransmitting(bool value)
+    internal void SetTransmittingInternal(bool value)
     {
         if (_isTransmitting == value) return;
         _isTransmitting = value;

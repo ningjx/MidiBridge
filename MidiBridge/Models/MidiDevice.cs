@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using Timer = System.Timers.Timer;
 
 namespace MidiBridge.Models;
 
@@ -30,7 +29,6 @@ public class MidiDevice : INotifyPropertyChanged, IDisposable
     private bool _isEnabled = true;
     private long _receivedMessages;
     private long _sentMessages;
-    private readonly Timer _transmitTimer;
 
     public string Id { get; init; } = Guid.NewGuid().ToString();
     public string Name { get; set; } = "Unknown";
@@ -43,16 +41,6 @@ public class MidiDevice : INotifyPropertyChanged, IDisposable
     public DateTime? ConnectedTime { get; set; }
     public DateTime LastActivity { get; set; } = DateTime.Now;
     public string? ErrorMessage { get; set; }
-
-    public MidiDevice()
-    {
-        _transmitTimer = new Timer(100);
-        _transmitTimer.Elapsed += (s, e) =>
-        {
-            SetTransmitting(false);
-            _transmitTimer.Stop();
-        };
-    }
 
     public MidiDeviceStatus Status
     {
@@ -90,12 +78,10 @@ public class MidiDevice : INotifyPropertyChanged, IDisposable
 
     public void PulseTransmit()
     {
-        SetTransmitting(true);
-        _transmitTimer.Stop();
-        _transmitTimer.Start();
+        TransmitIndicatorManager.Pulse(this);
     }
 
-    private void SetTransmitting(bool value)
+    internal void SetTransmittingInternal(bool value)
     {
         if (_isTransmitting == value) return;
         _isTransmitting = value;
@@ -161,8 +147,7 @@ public class MidiDevice : INotifyPropertyChanged, IDisposable
 
     public void Dispose()
     {
-        _transmitTimer?.Stop();
-        _transmitTimer?.Dispose();
+        TransmitIndicatorManager.Remove(this);
         Status = MidiDeviceStatus.Disconnected;
     }
 }

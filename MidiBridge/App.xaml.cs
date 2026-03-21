@@ -1,5 +1,6 @@
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
+using MidiBridge.Models;
 using MidiBridge.Services;
 using MidiBridge.Services.Interfaces;
 using MidiBridge.ViewModels;
@@ -24,10 +25,9 @@ public partial class App : Application
         LogService.Initialize();
         Log.Information("=== MidiBridge 启动 ===");
 
-        // 初始化全局调度器
         DispatcherService.Initialize();
+        TransmitIndicatorManager.Start();
 
-        // 配置依赖注入（ConfigService 在构造时自动加载配置）
         var services = new ServiceCollection();
         services.AddMidiBridgeServices();
         Services = services.BuildServiceProvider();
@@ -39,7 +39,8 @@ public partial class App : Application
     {
         Log.Information("=== MidiBridge 正在退出 ===");
 
-        // 清理资源
+        TransmitIndicatorManager.Stop();
+
         var deviceManager = Services.GetService<IMidiDeviceManager>();
         deviceManager?.Dispose();
 
