@@ -206,11 +206,11 @@ public class NetworkMidi2Service : INetworkMidi2Service
                 break;
 
             case NetworkMidi2Protocol.CommandCode.InvitationReplyAuthRequired:
-                HandleInvitationReplyAuthRequired(payload, cmdSpecific1, remoteEP, sessionId);
+                HandleInvitationReplyAuthRequired(cmdPacket, payload, cmdSpecific1, remoteEP, sessionId);
                 break;
 
             case NetworkMidi2Protocol.CommandCode.InvitationReplyUserAuthRequired:
-                HandleInvitationReplyUserAuthRequired(payload, cmdSpecific1, remoteEP, sessionId);
+                HandleInvitationReplyUserAuthRequired(cmdPacket, payload, cmdSpecific1, remoteEP, sessionId);
                 break;
 
             case NetworkMidi2Protocol.CommandCode.Ping:
@@ -261,7 +261,9 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
     private void HandleInvitation(byte[] cmdPacket, byte[] payload, byte nameWords, IPEndPoint remoteEP, string sessionId)
     {
-        if (!NetworkMidi2Protocol.ParseInvitationCommand(payload, nameWords, out var name, out var productInstanceId, out var capabilities))
+        var capabilities = (NetworkMidi2Protocol.InvitationCapabilities)cmdPacket[3];
+
+        if (!NetworkMidi2Protocol.ParseInvitationCommand(payload, nameWords, out var name, out var productInstanceId, out _))
         {
             SendNAK(remoteEP, NetworkMidi2Protocol.NAKReason.CommandMalformed, cmdPacket);
             return;
@@ -653,9 +655,11 @@ public class NetworkMidi2Service : INetworkMidi2Service
         Log.Debug("[NM2] 收到 Invitation Pending: {SessionId}", sessionId);
     }
 
-    private void HandleInvitationReplyAuthRequired(byte[] payload, byte nameWords, IPEndPoint remoteEP, string sessionId)
+    private void HandleInvitationReplyAuthRequired(byte[] cmdPacket, byte[] payload, byte nameWords, IPEndPoint remoteEP, string sessionId)
     {
-        if (!NetworkMidi2Protocol.ParseInvitationReplyAuthRequired(payload, nameWords, out var cryptoNonce, out var umpEndpointName, out var productInstanceId, out var authState))
+        var authState = (NetworkMidi2Protocol.AuthenticationState)cmdPacket[3];
+
+        if (!NetworkMidi2Protocol.ParseInvitationReplyAuthRequired(payload, nameWords, out var cryptoNonce, out var umpEndpointName, out var productInstanceId))
         {
             SendNAK(remoteEP, NetworkMidi2Protocol.NAKReason.CommandMalformed);
             return;
@@ -683,9 +687,11 @@ public class NetworkMidi2Service : INetworkMidi2Service
         Log.Information("[NM2] 收到认证要求: {Name}, CryptoNonce={Nonce}, State={State}", session.RemoteName, cryptoNonce, authState);
     }
 
-    private void HandleInvitationReplyUserAuthRequired(byte[] payload, byte nameWords, IPEndPoint remoteEP, string sessionId)
+    private void HandleInvitationReplyUserAuthRequired(byte[] cmdPacket, byte[] payload, byte nameWords, IPEndPoint remoteEP, string sessionId)
     {
-        if (!NetworkMidi2Protocol.ParseInvitationReplyAuthRequired(payload, nameWords, out var cryptoNonce, out var umpEndpointName, out var productInstanceId, out var authState))
+        var authState = (NetworkMidi2Protocol.AuthenticationState)cmdPacket[3];
+
+        if (!NetworkMidi2Protocol.ParseInvitationReplyAuthRequired(payload, nameWords, out var cryptoNonce, out var umpEndpointName, out var productInstanceId))
         {
             SendNAK(remoteEP, NetworkMidi2Protocol.NAKReason.CommandMalformed);
             return;

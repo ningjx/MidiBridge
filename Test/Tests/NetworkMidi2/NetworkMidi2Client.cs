@@ -466,11 +466,11 @@ public class NetworkMidi2Client : IDisposable
                 break;
                 
             case NetworkMidi2Protocol.CommandCode.InvitationReplyAuthRequired:
-                ProcessInvitationReplyAuthRequired(payload, cmdSpecific1);
+                ProcessInvitationReplyAuthRequired(cmdPacket, payload, cmdSpecific1);
                 break;
                 
             case NetworkMidi2Protocol.CommandCode.InvitationReplyUserAuthRequired:
-                ProcessInvitationReplyUserAuthRequired(payload, cmdSpecific1);
+                ProcessInvitationReplyUserAuthRequired(cmdPacket, payload, cmdSpecific1);
                 break;
                 
             case NetworkMidi2Protocol.CommandCode.Ping:
@@ -534,18 +534,20 @@ public class NetworkMidi2Client : IDisposable
         Log($"[NM2] INV_PENDING from remote: {umpEndpointName}, waiting for user approval...");
     }
     
-    private void ProcessInvitationReplyAuthRequired(byte[] payload, byte nameWords)
+    private void ProcessInvitationReplyAuthRequired(byte[] cmdPacket, byte[] payload, byte nameWords)
     {
-        NetworkMidi2Protocol.ParseInvitationReplyAuthRequired(payload, nameWords, out var cryptoNonce, out var umpEndpointName, out var productInstanceId, out var authState);
+        var authState = (NetworkMidi2Protocol.AuthenticationState)cmdPacket[3];
+        NetworkMidi2Protocol.ParseInvitationReplyAuthRequired(payload, nameWords, out var cryptoNonce, out var umpEndpointName, out var productInstanceId);
         
         _cryptoNonce = cryptoNonce;
         Log($"[NM2] INV_AUTH_REQUIRED from remote: {umpEndpointName}");
         Log($"[NM2] Crypto nonce: {cryptoNonce}, auth state: {authState}");
     }
     
-    private void ProcessInvitationReplyUserAuthRequired(byte[] payload, byte nameWords)
+    private void ProcessInvitationReplyUserAuthRequired(byte[] cmdPacket, byte[] payload, byte nameWords)
     {
-        NetworkMidi2Protocol.ParseInvitationReplyAuthRequired(payload, nameWords, out var cryptoNonce, out var umpEndpointName, out var productInstanceId, out var authState);
+        var authState = (NetworkMidi2Protocol.AuthenticationState)cmdPacket[3];
+        NetworkMidi2Protocol.ParseInvitationReplyAuthRequired(payload, nameWords, out var cryptoNonce, out var umpEndpointName, out var productInstanceId);
         
         _cryptoNonce = cryptoNonce;
         Log($"[NM2] INV_USER_AUTH_REQUIRED from remote: {umpEndpointName}");

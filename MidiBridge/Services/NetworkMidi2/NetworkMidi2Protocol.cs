@@ -461,24 +461,22 @@ public static class NetworkMidi2Protocol
         return true;
     }
 
-    public static bool ParseInvitationReplyAuthRequired(byte[] payload, byte nameWords, out string cryptoNonce, out string umpEndpointName, out string productInstanceId, out AuthenticationState authState)
+    public static bool ParseInvitationReplyAuthRequired(byte[] payload, byte nameWords, out string cryptoNonce, out string umpEndpointName, out string productInstanceId)
     {
         cryptoNonce = "";
         umpEndpointName = "";
         productInstanceId = "";
-        authState = AuthenticationState.FirstAuthRequest;
 
-        if (payload == null || payload.Length < 20) return false;
+        if (payload == null || payload.Length < 16) return false;
 
-        authState = (AuthenticationState)payload[3];
-        cryptoNonce = Encoding.ASCII.GetString(payload, 4, 16).TrimEnd('\0');
+        cryptoNonce = Encoding.ASCII.GetString(payload, 0, 16).TrimEnd('\0');
 
         int nameLen = nameWords * 4;
-        if (payload.Length < 20 + nameLen) return false;
+        if (payload.Length < 16 + nameLen) return false;
 
-        umpEndpointName = TrimString(Encoding.UTF8.GetString(payload, 20, nameLen));
+        umpEndpointName = TrimString(Encoding.UTF8.GetString(payload, 16, nameLen));
 
-        int productOffset = 20 + nameLen;
+        int productOffset = 16 + nameLen;
         int productLen = payload.Length - productOffset;
         if (productLen > 0)
         {
@@ -674,16 +672,14 @@ public static class NetworkMidi2Protocol
         productInstanceId = "";
         capabilities = (InvitationCapabilities)0;
 
-        if (payload == null || payload.Length < 4) return false;
-
-        capabilities = (InvitationCapabilities)payload[3];
+        if (payload == null || nameWords < 0) return false;
 
         int nameLen = nameWords * 4;
-        if (payload.Length < 4 + nameLen) return false;
+        if (payload.Length < nameLen) return false;
 
-        umpEndpointName = TrimString(Encoding.UTF8.GetString(payload, 4, nameLen));
+        umpEndpointName = TrimString(Encoding.UTF8.GetString(payload, 0, nameLen));
 
-        int productOffset = 4 + nameLen;
+        int productOffset = nameLen;
         int productLen = payload.Length - productOffset;
         if (productLen > 0)
         {
@@ -698,14 +694,14 @@ public static class NetworkMidi2Protocol
         umpEndpointName = "";
         productInstanceId = "";
 
-        if (payload == null || payload.Length < 4) return false;
+        if (payload == null || nameWords < 0) return false;
 
         int nameLen = nameWords * 4;
-        if (payload.Length < 4 + nameLen) return false;
+        if (payload.Length < nameLen) return false;
 
-        umpEndpointName = TrimString(Encoding.UTF8.GetString(payload, 4, nameLen));
+        umpEndpointName = TrimString(Encoding.UTF8.GetString(payload, 0, nameLen));
 
-        int productOffset = 4 + nameLen;
+        int productOffset = nameLen;
         int productLen = payload.Length - productOffset;
         if (productLen > 0)
         {
