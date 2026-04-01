@@ -684,9 +684,14 @@ protected override void OnMouseUp(MouseButtonEventArgs e)
 
     private void ContextMenu_Opened(object sender, RoutedEventArgs e)
     {
-        if (sender is ContextMenu menu && menu.PlacementTarget is Border border)
+        if (sender is ContextMenu menu)
         {
-            if (border.DataContext is MidiDevice device)
+            var border = menu.PlacementTarget as Border;
+            var device = border?.DataContext as MidiDevice;
+            
+            System.Diagnostics.Debug.WriteLine($"[ContextMenu] PlacementTarget: {border?.GetType().Name ?? "null"}, Device: {device?.Name ?? "null"}");
+
+            if (device != null)
             {
                 foreach (var item in menu.Items)
                 {
@@ -696,6 +701,8 @@ protected override void OnMouseUp(MouseButtonEventArgs e)
                         {
                             menuItem.Visibility = device.IsNetwork ? Visibility.Visible : Visibility.Collapsed;
                             menuItem.DataContext = device;
+                            menuItem.Tag = device;
+                            System.Diagnostics.Debug.WriteLine($"[ContextMenu] EndSessionMenuItem visible: {menuItem.Visibility}, IsNetwork: {device.IsNetwork}");
                         }
                         else
                         {
@@ -720,9 +727,14 @@ protected override void OnMouseUp(MouseButtonEventArgs e)
 
     private void EndSession_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is MenuItem menuItem && menuItem.DataContext is MidiDevice device)
+        if (sender is MenuItem menuItem)
         {
-            VM.EndSession(device);
+            var device = menuItem.DataContext as MidiDevice ?? menuItem.Tag as MidiDevice;
+            System.Diagnostics.Debug.WriteLine($"[EndSession] Device: {device?.Name ?? "null"}");
+            if (device != null)
+            {
+                VM.EndSession(device);
+            }
         }
     }
 

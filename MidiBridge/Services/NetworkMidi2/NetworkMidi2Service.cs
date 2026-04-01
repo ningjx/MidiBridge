@@ -1210,9 +1210,15 @@ public class NetworkMidi2Service : INetworkMidi2Service
         }
     }
 
-    public void EndSession(string sessionId)
+    public void EndSession(string deviceId)
     {
-        if (!_sessions.TryGetValue(sessionId, out var session)) return;
+        var sessionEntry = _sessions.FirstOrDefault(kvp => 
+            GetStableDeviceId(kvp.Value.RemoteName, kvp.Value.RemoteHost) == deviceId);
+        
+        if (sessionEntry.Value.Equals(default(NetworkMidi2Protocol.SessionInfo))) return;
+
+        string sessionId = sessionEntry.Key;
+        var session = sessionEntry.Value;
 
         _ = Task.Run(async () =>
         {
