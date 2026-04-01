@@ -22,16 +22,17 @@
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
             
-            <Border Grid.Row="0" Background="#252525" CornerRadius="8,8,0,0"
-                    MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+            <Border Grid.Row="0" Background="#252525" CornerRadius="8,8,0,0">
                 <Grid>
                     <TextBlock Text="连接 Network MIDI 2.0 设备" 
                                Margin="12,0,0,0" VerticalAlignment="Center"
-                               Foreground="#E0E0E0" FontSize="12"/>
+                               Foreground="#E0E0E0" FontSize="12"
+                               MouseLeftButtonDown="TitleBar_MouseLeftButtonDown"
+                               Cursor="SizeAll"/>
                     <Button Content="✕" Click="CloseButton_Click"
                             HorizontalAlignment="Right" VerticalAlignment="Center"
                             Margin="0,0,8,0" Width="24" Height="20"
-                            FontSize="12" Foreground="#666" Background="Transparent"
+                            FontSize="12" Foreground="#888" Background="Transparent"
                             BorderThickness="0" Cursor="Hand">
                         <Button.Style>
                             <Style TargetType="Button">
@@ -39,12 +40,12 @@
                                     <Setter.Value>
                                         <ControlTemplate TargetType="Button">
                                             <Border x:Name="btnBorder" Background="{TemplateBinding Background}"
-                                                    CornerRadius="3" BorderThickness="1" BorderBrush="Transparent">
+                                                    CornerRadius="3">
                                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                             </Border>
                                             <ControlTemplate.Triggers>
                                                 <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="btnBorder" Property="Background" Value="#E81123"/>
+                                                    <Setter TargetName="btnBorder" Property="Background" Value="#C42B1C"/>
                                                     <Setter Property="Foreground" Value="White"/>
                                                 </Trigger>
                                             </ControlTemplate.Triggers>
@@ -134,23 +135,23 @@
                 
                 <Button Grid.Row="1" Content="连接" Click="ConnectButton_Click"
                         HorizontalAlignment="Center"
-                        Width="80" Height="26"
+                        Width="80" Height="28"
                         FontWeight="Medium" FontSize="11">
                     <Button.Style>
                         <Style TargetType="Button">
                             <Setter Property="Background" Value="#4A90D9"/>
-                            <Setter Property="Foreground" Value="#E0E0E0"/>
+                            <Setter Property="Foreground" Value="White"/>
                             <Setter Property="BorderThickness" Value="0"/>
                             <Setter Property="Template">
                                 <Setter.Value>
                                     <ControlTemplate TargetType="Button">
                                         <Border x:Name="border" Background="{TemplateBinding Background}"
-                                                CornerRadius="4" Padding="{TemplateBinding Padding}">
+                                                CornerRadius="4">
                                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                         </Border>
                                         <ControlTemplate.Triggers>
                                             <Trigger Property="IsMouseOver" Value="True">
-                                                <Setter TargetName="border" Property="Background" Value="#5A9FE8"/>
+                                                <Setter TargetName="border" Property="Background" Value="#5BA0E9"/>
                                             </Trigger>
                                             <Trigger Property="IsPressed" Value="True">
                                                 <Setter TargetName="border" Property="Background" Value="#3A80C9"/>
