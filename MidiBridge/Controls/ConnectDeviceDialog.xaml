@@ -33,7 +33,8 @@
                             HorizontalAlignment="Right" VerticalAlignment="Center"
                             Margin="0,0,8,0" Width="24" Height="20"
                             FontSize="12" Foreground="#888" Background="Transparent"
-                            BorderThickness="0" Cursor="Hand">
+                            BorderThickness="0" Cursor="Hand"
+                            WindowChrome.IsHitTestVisibleInChrome="True">
                         <Button.Style>
                             <Style TargetType="Button">
                                 <Setter Property="Template">
