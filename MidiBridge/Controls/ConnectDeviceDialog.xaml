@@ -77,7 +77,6 @@
                                Foreground="#AAA" FontSize="11" Margin="0,0,4,0"/>
                     <TextBox Grid.Column="1" x:Name="IpTextBox"
                              Text="127.0.0.1" VerticalContentAlignment="Center"
-                             HorizontalContentAlignment="Center"
                              Width="110" Height="22" FontSize="11"
                              Background="#2D2D2D" Foreground="#E0E0E0"
                              BorderBrush="#3D3D3D" BorderThickness="1">
@@ -114,7 +113,6 @@
                                Foreground="#AAA" FontSize="11" Margin="10,0,4,0"/>
                     <TextBox Grid.Column="3" x:Name="PortTextBox"
                              Text="5506" VerticalContentAlignment="Center"
-                             HorizontalContentAlignment="Center"
                              Width="55" Height="22" FontSize="11"
                              Background="#2D2D2D" Foreground="#E0E0E0"
                              BorderBrush="#3D3D3D" BorderThickness="1">
