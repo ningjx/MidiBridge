@@ -692,13 +692,37 @@ protected override void OnMouseUp(MouseButtonEventArgs e)
                 {
                     if (item is MenuItem menuItem)
                     {
-                        menuItem.DataContext = VM;
-                        menuItem.Command = VM.ToggleDeviceEnabledCommand;
-                        menuItem.CommandParameter = device.Id;
-                        menuItem.Header = device.EnabledText;
+                        if (menuItem.Name == "EndSessionMenuItem")
+                        {
+                            menuItem.Visibility = device.IsNetwork ? Visibility.Visible : Visibility.Collapsed;
+                            menuItem.DataContext = device;
+                        }
+                        else
+                        {
+                            menuItem.DataContext = VM;
+                            menuItem.Command = VM.ToggleDeviceEnabledCommand;
+                            menuItem.CommandParameter = device.Id;
+                            menuItem.Header = device.EnabledText;
+                        }
                     }
                 }
             }
+        }
+    }
+
+    private void DisableDevice_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem menuItem && menuItem.Command != null)
+        {
+            menuItem.Command.Execute(menuItem.CommandParameter);
+        }
+    }
+
+    private void EndSession_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem menuItem && menuItem.DataContext is MidiDevice device)
+        {
+            VM.EndSession(device);
         }
     }
 

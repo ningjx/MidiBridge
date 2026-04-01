@@ -464,8 +464,9 @@
                                     </Style>
                                 </Border.Style>
                                     <Border.ContextMenu>
-                                        <ContextMenu Style="{StaticResource ModernContextMenu}" Opened="ContextMenu_Opened">
-                                            <MenuItem Header="禁用" Style="{StaticResource ModernMenuItem}"/>
+                                        <ContextMenu Style="{StaticResource ModernContextMenu}" Opened="ContextMenu_Opened" x:Name="InputDeviceContextMenu">
+                                            <MenuItem Header="禁用" Style="{StaticResource ModernMenuItem}" Click="DisableDevice_Click"/>
+                                            <MenuItem Header="结束会话" Style="{StaticResource ModernMenuItem}" Click="EndSession_Click" x:Name="EndSessionMenuItem"/>
                                         </ContextMenu>
                                     </Border.ContextMenu>
                                     <Grid>

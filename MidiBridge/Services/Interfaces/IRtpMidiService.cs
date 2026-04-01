@@ -52,6 +52,12 @@ public interface IRtpMidiService : IDisposable
     Task<bool> ConnectAsync(string host, int port, string name = "MidiBridge");
 
     /// <summary>
+    /// 断开与远程设备的连接。
+    /// </summary>
+    /// <param name="sessionId">会话ID。</param>
+    void Disconnect(string sessionId);
+
+    /// <summary>
     /// 设备添加事件。
     /// </summary>
     event EventHandler<MidiDevice>? DeviceAdded;

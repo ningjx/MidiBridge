@@ -297,6 +297,11 @@ public class MidiDeviceManager : IMidiDeviceManager
         _networkMidi2Service.EndSession(sessionId);
     }
 
+    public void EndRtpSession(string sessionId)
+    {
+        _rtpMidiService.Disconnect(sessionId);
+    }
+
     public void RefreshNM2Discovery()
     {
         _mdnsDiscoveryService.QueryServices();

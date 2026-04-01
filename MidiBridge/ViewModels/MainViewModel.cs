@@ -529,6 +529,22 @@ public class MainViewModel : ViewModelBase
         SelectedDiscoveredDevice = null;
     }
 
+    public void EndSession(MidiDevice device)
+    {
+        if (device == null) return;
+
+        if (device.Type == MidiDeviceType.NetworkMidi2)
+        {
+            _deviceManager.EndNM2Session(device.Id);
+            StatusMessage = $"已结束 NM2 会话: {device.Name}";
+        }
+        else if (device.Type == MidiDeviceType.RtpMidi)
+        {
+            _deviceManager.EndRtpSession(device.Id);
+            StatusMessage = $"已结束 RTP 会话: {device.Name}";
+        }
+    }
+
     public void SaveConfig(double left, double top, double width, double height, bool isMaximized)
     {
         _configService.UpdateWindowPosition(left, top, width, height, isMaximized);

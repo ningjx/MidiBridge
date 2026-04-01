@@ -183,6 +183,52 @@ public class RtpMidiService : IRtpMidiService
         OnStatusChanged("RTP-MIDI 服务已停止");
     }
 
+    public void Disconnect(string sessionId)
+    {
+        if (!_devices.TryGetValue(sessionId, out var device)) return;
+        if (!_deviceEndpoints.TryGetValue(sessionId, out var endpoint)) return;
+
+        SendBye(endpoint);
+
+        _devices.TryRemove(sessionId, out _);
+        CleanupDevice(sessionId);
+        DeviceRemoved?.Invoke(this, device);
+
+        Log.Information("[RtpMidi] 已断开连接: {Name}", device.Name);
+    }
+
+    private void SendBye(IPEndPoint remoteEP)
+    {
+        try
+        {
+            var packet = new byte[16];
+
+            packet[0] = 0xFF;
+            packet[1] = 0xFF;
+            packet[2] = (byte)'B';
+            packet[3] = (byte)'Y';
+
+            packet[4] = 0x00;
+            packet[5] = 0x02;
+
+            WriteBigEndianUInt32(packet, 6, _localSSRC);
+
+            packet[10] = 0x00;
+            packet[11] = 0x00;
+            packet[12] = 0x00;
+            packet[13] = 0x00;
+            packet[14] = 0x00;
+            packet[15] = 0x00;
+
+            _controlServer?.Send(packet, packet.Length, remoteEP);
+            Log.Debug("[RTP] 发送 BY 到 {RemoteEP}", remoteEP);
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "[RTP] 发送 BY 失败: {RemoteEP}", remoteEP);
+        }
+    }
+
     public async Task<bool> ConnectAsync(string host, int port, string name = "MidiBridge")
     {
         if (_dataServer == null) return false;

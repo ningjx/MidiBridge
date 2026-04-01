@@ -112,6 +112,12 @@ public interface IMidiDeviceManager : IDisposable
     void EndNM2Session(string sessionId);
 
     /// <summary>
+    /// 结束 RTP-MIDI 会话。
+    /// </summary>
+    /// <param name="sessionId">会话ID。</param>
+    void EndRtpSession(string sessionId);
+
+    /// <summary>
     /// 刷新 Network MIDI 2.0 设备发现。
     /// </summary>
     void RefreshNM2Discovery();
