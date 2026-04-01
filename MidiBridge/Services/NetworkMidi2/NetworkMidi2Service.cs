@@ -1119,6 +1119,8 @@ public class NetworkMidi2Service : INetworkMidi2Service
         if (_sessions.TryRemove(sessionId, out var session))
         {
             Log.Debug("[NM2] 收到 Bye Reply: {SessionId}", sessionId);
+            string stableId = GetStableDeviceId(session.RemoteName, session.RemoteHost);
+            RemoveDevice(stableId);
         }
     }
 
@@ -1212,10 +1214,19 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
     public void EndSession(string deviceId)
     {
+        Log.Debug("[NM2] EndSession called with deviceId: {DeviceId}", deviceId);
+        
         var sessionEntry = _sessions.FirstOrDefault(kvp => 
             GetStableDeviceId(kvp.Value.RemoteName, kvp.Value.RemoteHost) == deviceId);
         
-        if (sessionEntry.Value.Equals(default(NetworkMidi2Protocol.SessionInfo))) return;
+        Log.Debug("[NM2] Session lookup result: Key={Key}, RemoteName={RemoteName}, RemoteHost={RemoteHost}", 
+            sessionEntry.Key, sessionEntry.Value.RemoteName, sessionEntry.Value.RemoteHost);
+        
+        if (sessionEntry.Value.Equals(default(NetworkMidi2Protocol.SessionInfo)))
+        {
+            Log.Warning("[NM2] No session found for deviceId: {DeviceId}", deviceId);
+            return;
+        }
 
         string sessionId = sessionEntry.Key;
         var session = sessionEntry.Value;
@@ -1688,24 +1699,33 @@ public class NetworkMidi2Service : INetworkMidi2Service
         return session;
     }
 
-    private void RemoveDevice(string sessionId)
+private void RemoveDevice(string deviceId)
     {
         try
         {
+            Log.Debug("[NM2] RemoveDevice called: {DeviceId}", deviceId);
+            
             DispatcherService.RunOnUIThread(() =>
             {
-                var device = InputDevices.FirstOrDefault(d => d.Id == sessionId);
+                var device = InputDevices.FirstOrDefault(d => d.Id == deviceId);
                 if (device != null)
                 {
+                    Log.Debug("[NM2] Found device to remove: {DeviceId}, Name={Name}", deviceId, device.Name);
                     InputDevices.Remove(device);
                     DeviceRemoved?.Invoke(this, device);
+                    Log.Information("[NM2] 设备已移除: {Name}", device.Name);
+                }
+                else
+                {
+                    Log.Warning("[NM2] Device not found for removal: {DeviceId}, existing devices: [{Devices}]", 
+                        deviceId, string.Join(", ", InputDevices.Select(d => d.Id)));
                 }
             });
         }
         catch (Exception ex)
         {
-            Log.Debug(ex, "[NM2] 移除设备失败: {SessionId}", sessionId);
-        }
+            Log.Error(ex, "[NM2] 移除设备失败: {DeviceId}", deviceId);
+}
     }
 
     private void UpdateDeviceTransmit(NetworkMidi2Protocol.SessionInfo session)
