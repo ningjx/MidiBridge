@@ -908,12 +908,17 @@ protected override void OnMouseUp(MouseButtonEventArgs e)
     {
         if (!_connectionPaths.TryGetValue(routeId, out var path)) return;
 
+        var route = VM.Routes.FirstOrDefault(r => r.Id == routeId);
+        if (route == null) return;
+
+        var originalColor = GetRouteColor(route.Source.Id);
+
         var storyboard = new Storyboard();
 
         var colorAnim = new ColorAnimationUsingKeyFrames();
         colorAnim.KeyFrames.Add(new DiscreteColorKeyFrame(Colors.LightGreen, KeyTime.FromTimeSpan(TimeSpan.Zero)));
         colorAnim.KeyFrames.Add(new DiscreteColorKeyFrame(Colors.LightGreen, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(50))));
-        colorAnim.KeyFrames.Add(new EasingColorKeyFrame(((SolidColorBrush)path.Stroke).Color, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(100))));
+        colorAnim.KeyFrames.Add(new EasingColorKeyFrame(originalColor, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(100))));
 
         Storyboard.SetTargetProperty(colorAnim, new PropertyPath("(Shape.Stroke).(SolidColorBrush.Color)"));
         storyboard.Children.Add(colorAnim);
