@@ -697,9 +697,18 @@ public static class NetworkMidi2Protocol
         if (payload == null || nameWords < 0) return false;
 
         int nameLen = nameWords * 4;
-        if (payload.Length < nameLen) return false;
+        Serilog.Log.Debug("[NM2] ParseInvitationReply: payload.Length={PayloadLen}, nameWords={NameWords}, nameLen={NameLen}", 
+            payload.Length, nameWords, nameLen);
+
+        if (payload.Length < nameLen)
+        {
+            Serilog.Log.Debug("[NM2] ParseInvitationReply: payload 长度不足, 需要 {NameLen}, 实际 {PayloadLen}", nameLen, payload.Length);
+            return false;
+        }
 
         umpEndpointName = TrimString(Encoding.UTF8.GetString(payload, 0, nameLen));
+        Serilog.Log.Debug("[NM2] ParseInvitationReply: 原始名称字节={RawName}, 解析后={ParsedName}", 
+            BitConverter.ToString(payload, 0, nameLen), umpEndpointName);
 
         int productOffset = nameLen;
         int productLen = payload.Length - productOffset;
@@ -789,9 +798,10 @@ public static class NetworkMidi2Protocol
     {
         return messageType switch
         {
-            0x0 or 0x1 or 0x3 or 0x7 or 0x8 or 0x9 or 0xA or 0xB or 0xC or 0xD or 0xE or 0xF => 4,
-            0x2 or 0x4 or 0x6 => 8,
-            0x5 => 16,
+            0x0 or 0x1 or 0x2 or 0x6 or 0x7 => 4,
+            0x3 or 0x4 or 0x8 or 0x9 or 0xA => 8,
+            0xB or 0xC => 12,
+            0x5 or 0xD or 0xE or 0xF => 16,
             _ => 4
         };
     }

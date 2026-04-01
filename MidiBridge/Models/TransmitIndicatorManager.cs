@@ -6,7 +6,7 @@ namespace MidiBridge.Models;
 
 public static class TransmitIndicatorManager
 {
-    private const int FLASH_INTERVAL_MS = 50;
+    private const int FLASH_INTERVAL_MS = 150;
     private const int STATS_UPDATE_INTERVAL_MS = 100;
 
     private static readonly ConcurrentDictionary<object, long> s_lastPulseTime = new();
@@ -100,7 +100,7 @@ public static class TransmitIndicatorManager
             {
                 if (s_lastPulseTime.TryGetValue(key, out var lastPulse))
                 {
-                    if (lastPulse <= timerTime)
+                    if (timerTime - lastPulse >= FLASH_INTERVAL_MS)
                     {
                         SetTransmitting(key, false);
                         s_lastPulseTime.TryRemove(key, out _);

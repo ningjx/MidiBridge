@@ -85,6 +85,7 @@ public class MidiRoute : INotifyPropertyChanged
 
     public void PulseTransmit()
     {
+        Serilog.Log.Debug("[MidiRoute] PulseTransmit: {RouteId}, HashCode={HashCode}", Id, GetHashCode());
         TransmitIndicatorManager.Pulse(this);
     }
 
@@ -92,6 +93,7 @@ public class MidiRoute : INotifyPropertyChanged
     {
         if (_isTransmitting == value) return;
         _isTransmitting = value;
+        Serilog.Log.Debug("[MidiRoute] SetTransmittingInternal: {RouteId}, Value={Value}", Id, value);
         OnPropertyChanged(nameof(IsTransmitting));
     }
 

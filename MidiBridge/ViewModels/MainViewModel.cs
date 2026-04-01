@@ -113,7 +113,6 @@ public class MainViewModel : ViewModelBase
     public ICommand ClearRoutesCommand { get; }
     public ICommand C4DownCommand { get; }
     public ICommand C4UpCommand { get; }
-    public ICommand RefreshNM2DiscoveryCommand { get; }
     public ICommand InviteNM2DeviceCommand { get; }
     public ICommand CloseDiscoveryPanelCommand { get; }
     public ICommand ToggleDeviceEnabledCommand { get; }
@@ -167,7 +166,6 @@ public class MainViewModel : ViewModelBase
         ClearRoutesCommand = new RelayCommand(_ => ClearAllRoutes());
         C4DownCommand = new RelayCommand(_ => SendC4On(), _ => HasConnectedOutput());
         C4UpCommand = new RelayCommand(_ => SendC4Off(), _ => _isC4Pressed);
-        RefreshNM2DiscoveryCommand = new RelayCommand(_ => RefreshNM2Discovery(), _ => _deviceManager.IsRunning);
         InviteNM2DeviceCommand = new RelayCommand(_ => InviteNM2Device(), _ => _selectedDiscoveredDevice != null && _deviceManager.IsRunning);
         CloseDiscoveryPanelCommand = new RelayCommand(_ =>
         {
@@ -213,7 +211,6 @@ public class MainViewModel : ViewModelBase
         ClearRoutesCommand = new RelayCommand(_ => ClearAllRoutes());
         C4DownCommand = new RelayCommand(_ => SendC4On(), _ => HasConnectedOutput());
         C4UpCommand = new RelayCommand(_ => SendC4Off(), _ => _isC4Pressed);
-        RefreshNM2DiscoveryCommand = new RelayCommand(_ => RefreshNM2Discovery(), _ => _deviceManager.IsRunning);
         InviteNM2DeviceCommand = new RelayCommand(_ => InviteNM2Device(), _ => _selectedDiscoveredDevice != null && _deviceManager.IsRunning);
         CloseDiscoveryPanelCommand = new RelayCommand(_ =>
         {
@@ -489,10 +486,20 @@ public class MainViewModel : ViewModelBase
         }
     }
 
-    private void RefreshNM2Discovery()
+    public async void ConnectNM2Device(string ip, int port)
     {
-        _deviceManager.RefreshNM2Discovery();
-        StatusMessage = "正在搜索 Network MIDI 2.0 设备...";
+        StatusMessage = $"正在连接 {ip}:{port}...";
+
+        var success = await _deviceManager.InviteNM2Device(ip, port, $"NM2-{ip}");
+
+        if (success)
+        {
+            StatusMessage = $"已连接到 {ip}:{port}";
+        }
+        else
+        {
+            StatusMessage = $"连接 {ip}:{port} 失败";
+        }
     }
 
     private async void InviteNM2Device()

@@ -724,6 +724,19 @@ protected override void OnMouseUp(MouseButtonEventArgs e)
         Close();
     }
 
+    private void ConnectNM2Button_Click(object sender, RoutedEventArgs e)
+    {
+        if (!VM.IsNetworkRunning) return;
+
+        var dialog = new ConnectDeviceDialog();
+        dialog.Owner = this;
+        
+        if (dialog.ShowDialog() == true)
+        {
+            VM.ConnectNM2Device(dialog.DeviceIp, dialog.DevicePort);
+        }
+    }
+
     private void Device_MouseEnter(object sender, MouseEventArgs e)
     {
         if (sender is Border border)

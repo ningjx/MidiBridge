@@ -279,8 +279,19 @@ public class MidiRouter : IMidiRouter
     public void RouteMessage(MidiDevice source, byte[] data)
     {
         if (data.Length < 1) return;
-        if (!source.IsEnabled) return;
-        if (!_routesBySource.TryGetValue(source.Id, out var routes) || routes.Count == 0) return;
+        if (!source.IsEnabled) 
+        {
+            Log.Debug("[MidiRouter] 设备已禁用，跳过路由: {SourceId}", source.Id);
+            return;
+        }
+        if (!_routesBySource.TryGetValue(source.Id, out var routes) || routes.Count == 0) 
+        {
+            Log.Debug("[MidiRouter] 无路由匹配: SourceId={SourceId}, 数据={Data}", source.Id, BitConverter.ToString(data));
+            return;
+        }
+
+        Log.Debug("[MidiRouter] 路由消息: SourceId={SourceId}, 路由数={RouteCount}, 数据={Data}", 
+            source.Id, routes.Count, BitConverter.ToString(data));
 
         byte status = data[0];
         bool isSysEx = status == 0xF0;
