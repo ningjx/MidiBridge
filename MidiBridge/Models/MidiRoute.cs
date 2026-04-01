@@ -85,16 +85,7 @@ public class MidiRoute : INotifyPropertyChanged
 
     public void PulseTransmit()
     {
-        Serilog.Log.Debug("[MidiRoute] PulseTransmit: {RouteId}, HashCode={HashCode}", Id, GetHashCode());
         TransmitIndicatorManager.Pulse(this);
-    }
-
-    internal void SetTransmittingInternal(bool value)
-    {
-        if (_isTransmitting == value) return;
-        _isTransmitting = value;
-        Serilog.Log.Debug("[MidiRoute] SetTransmittingInternal: {RouteId}, Value={Value}", Id, value);
-        OnPropertyChanged(nameof(IsTransmitting));
     }
 
     internal void AddTransferredMessages(long count)
@@ -106,7 +97,8 @@ public class MidiRoute : INotifyPropertyChanged
 
     public void IncrementTransferred()
     {
-        TransmitIndicatorManager.IncrementTransferred(this);
+        _transferredMessages++;
+        OnPropertyChanged(nameof(TransferredMessages));
     }
 
     private void OnDevicePropertyChanged(object? sender, PropertyChangedEventArgs e)

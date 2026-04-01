@@ -181,8 +181,6 @@ public class NetworkMidi2Service : INetworkMidi2Service
             return;
         }
 
-        Log.Debug("[NM2] 收到命令: {CmdCode:X2}, 来源: {RemoteEP}", (byte)cmdCode, remoteEP);
-
         switch (cmdCode)
         {
             case NetworkMidi2Protocol.CommandCode.Invitation:
@@ -198,7 +196,6 @@ public class NetworkMidi2Service : INetworkMidi2Service
                 break;
 
             case NetworkMidi2Protocol.CommandCode.InvitationReplyAccepted:
-                Log.Debug("[NM2] 收到 InvitationReplyAccepted: cmdPacket={CmdPacket}", BitConverter.ToString(cmdPacket));
                 HandleInvitationReplyAccepted(payload, cmdSpecific1, remoteEP, sessionId);
                 break;
 
@@ -264,16 +261,11 @@ public class NetworkMidi2Service : INetworkMidi2Service
     {
         var capabilities = (NetworkMidi2Protocol.InvitationCapabilities)cmdPacket[3];
 
-        Log.Debug("[NM2] HandleInvitation: cmdPacket={CmdPacket}, payload={Payload}, nameWords={NameWords}, capabilities={Capabilities}",
-            BitConverter.ToString(cmdPacket), BitConverter.ToString(payload), nameWords, capabilities);
-
         if (!NetworkMidi2Protocol.ParseInvitationCommand(payload, nameWords, out var name, out var productInstanceId, out _))
         {
             SendNAK(remoteEP, NetworkMidi2Protocol.NAKReason.CommandMalformed, cmdPacket);
             return;
         }
-
-        Log.Debug("[NM2] ParseInvitationCommand result: name={Name}, productInstanceId={ProductInstanceId}", name, productInstanceId);
 
         if (_sessions.TryGetValue(sessionId, out var existingSession) && existingSession.State == NetworkMidi2Protocol.SessionState.Established)
         {
@@ -637,27 +629,10 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
     private void HandleInvitationReplyAccepted(byte[] payload, byte nameWords, IPEndPoint remoteEP, string sessionId)
     {
-        Log.Debug("[NM2] HandleInvitationReplyAccepted: payload={Payload}, nameWords={NameWords}", 
-            BitConverter.ToString(payload), nameWords);
+        if (!_sessions.TryGetValue(sessionId, out var session)) return;
+        if (session.State != NetworkMidi2Protocol.SessionState.PendingInvitation) return;
 
-        if (!_sessions.TryGetValue(sessionId, out var session))
-        {
-            Log.Debug("[NM2] HandleInvitationReplyAccepted: 未找到 session {SessionId}", sessionId);
-            return;
-        }
-        if (session.State != NetworkMidi2Protocol.SessionState.PendingInvitation)
-        {
-            Log.Debug("[NM2] HandleInvitationReplyAccepted: session 状态不对: {State}", session.State);
-            return;
-        }
-
-        if (!NetworkMidi2Protocol.ParseInvitationReply(payload, nameWords, out var name, out var productInstanceId))
-        {
-            Log.Warning("[NM2] HandleInvitationReplyAccepted: 解析失败");
-            return;
-        }
-
-        Log.Debug("[NM2] HandleInvitationReplyAccepted: 解析成功, name={Name}, productInstanceId={ProductInstanceId}", name, productInstanceId);
+        if (!NetworkMidi2Protocol.ParseInvitationReply(payload, nameWords, out var name, out var productInstanceId)) return;
 
         session.State = NetworkMidi2Protocol.SessionState.Established;
         session.RemoteName = name;
@@ -965,27 +940,16 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
     private void ProcessUMPData(byte[] umpData, NetworkMidi2Protocol.SessionInfo session)
     {
-        if (umpData == null || umpData.Length == 0)
-        {
-            Log.Debug("[NM2] 收到 Zero Length UMP Data");
-            return;
-        }
-
+        if (umpData == null || umpData.Length == 0) return;
         if (umpData.Length < 4) return;
 
         string stableId = GetStableDeviceId(session.RemoteName, session.RemoteHost);
-        Log.Debug("[NM2] 处理UMP数据: {Length} 字节, SessionName={SessionName}, StableId={StableId}", 
-            umpData.Length, session.RemoteName, stableId);
-        Log.Debug("[NM2] UMP原始数据: {UmpData}", BitConverter.ToString(umpData));
 
         int offset = 0;
         while (offset + 4 <= umpData.Length)
         {
             int messageType = NetworkMidi2Protocol.GetUMPMessageType(umpData, offset);
             int packetSize = NetworkMidi2Protocol.GetUMPPacketSize(messageType);
-
-            Log.Debug("[NM2] UMP包: offset={Offset}, messageType={MsgType:X}, packetSize={PktSize}", 
-                offset, messageType, packetSize);
 
             if (offset + packetSize > umpData.Length) break;
 
@@ -994,22 +958,10 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
             byte[] midiData = ConvertUMPToMidi1(singleUMP);
 
-            Log.Debug("[NM2] 转换MIDI: {MidiData}, 长度={Len}", BitConverter.ToString(midiData), midiData.Length);
-
             var device = InputDevices.FirstOrDefault(d => d.Id == stableId);
-            if (device != null)
-            {
-                Log.Debug("[NM2] 找到设备: {DeviceId}, {DeviceName}", device.Id, device.Name);
-            }
-            else
-            {
-                Log.Warning("[NM2] 未找到设备: StableId={StableId}, 现有设备: [{Devices}]", 
-                    stableId, string.Join(", ", InputDevices.Select(d => d.Id)));
-            }
 
             if (midiData.Length > 0 && device != null)
             {
-                Log.Debug("[NM2] -> 触发 MidiDataReceived: {MidiData}", BitConverter.ToString(midiData));
                 MidiDataReceived?.Invoke(this, (device, midiData));
             }
 

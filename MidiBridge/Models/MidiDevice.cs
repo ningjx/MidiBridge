@@ -135,13 +135,6 @@ public class MidiDevice : INotifyPropertyChanged, IDisposable
         TransmitIndicatorManager.Pulse(this);
     }
 
-    internal void SetTransmittingInternal(bool value)
-    {
-        if (_isTransmitting == value) return;
-        _isTransmitting = value;
-        OnPropertyChanged(nameof(IsTransmitting));
-    }
-
     public bool IsTransmitting
     {
         get => _isTransmitting;
@@ -173,12 +166,14 @@ public class MidiDevice : INotifyPropertyChanged, IDisposable
 
     public void IncrementReceived()
     {
-        TransmitIndicatorManager.IncrementReceived(this);
+        _receivedMessages++;
+        OnPropertyChanged(nameof(ReceivedMessages));
     }
 
     public void IncrementSent()
     {
-        TransmitIndicatorManager.IncrementSent(this);
+        _sentMessages++;
+        OnPropertyChanged(nameof(SentMessages));
     }
 
     public bool IsInput => Type == MidiDeviceType.LocalInput || Type == MidiDeviceType.RtpMidi || Type == MidiDeviceType.NetworkMidi2;

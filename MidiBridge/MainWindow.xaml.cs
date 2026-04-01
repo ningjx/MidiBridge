@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     private MainViewModel VM => (MainViewModel)DataContext;
     private readonly Dictionary<string, MidiRoute> _subscribedRoutes = new();
     private readonly Dictionary<string, Color> _deviceColors = new();
+    private readonly Dictionary<string, Path> _connectionPaths = new();
     private static readonly Random _random = new();
     private int _colorIndex;
     
@@ -75,6 +76,8 @@ public partial class MainWindow : Window
         }
         
         InitializeComponent();
+
+        TransmitIndicatorManager.TransmitPulse += OnTransmitPulse;
         
         if (config.IsMaximized)
         {
@@ -201,6 +204,7 @@ public partial class MainWindow : Window
         if (ConnectionCanvas == null || ConnectionCanvas.ActualWidth == 0) return;
 
         ConnectionCanvas.Children.Clear();
+        _connectionPaths.Clear();
 
         foreach (var route in VM.Routes)
         {
@@ -217,6 +221,7 @@ public partial class MainWindow : Window
             var path = CreateBezierPath(startPoint.X, startPoint.Y, endPoint.X, endPoint.Y, GetRouteColor(route.Source.Id), route);
             path.MouseRightButtonDown += Connection_RightClick;
             ConnectionCanvas.Children.Add(path);
+            _connectionPaths[route.Id] = path;
         }
     }
 
@@ -848,5 +853,114 @@ protected override void OnMouseUp(MouseButtonEventArgs e)
         VM.ClearSelection();
         DrawConnections();
         e.Handled = true;
+    }
+
+    private void OnTransmitPulse(object? sender, TransmitEventArgs e)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (e.Target is MidiDevice device)
+            {
+                AnimateDeviceTransmit(device.Id);
+            }
+            else if (e.Target is MidiRoute route)
+            {
+                AnimateRouteTransmit(route.Id);
+            }
+        });
+    }
+
+    private void AnimateDeviceTransmit(string deviceId)
+    {
+        var inputGlow = FindConnectorGlow(InputItemsControl, deviceId);
+        var outputGlow = FindConnectorGlow(OutputItemsControl, deviceId);
+
+        if (inputGlow != null) AnimateGlow(inputGlow, Colors.DodgerBlue);
+        if (outputGlow != null) AnimateGlow(outputGlow, Colors.DodgerBlue);
+    }
+
+    private Ellipse? FindConnectorGlow(ItemsControl itemsControl, string deviceId)
+    {
+        foreach (var item in itemsControl.Items)
+        {
+            var container = itemsControl.ItemContainerGenerator.ContainerFromItem(item) as ContentPresenter;
+            if (container == null) continue;
+
+            var border = FindVisualChild<Border>(container);
+            if (border?.Tag?.ToString() == deviceId)
+            {
+                var grid = FindVisualChild<Grid>(container);
+                if (grid != null)
+                {
+                    return grid.Children.OfType<Ellipse>().FirstOrDefault(e => e.Name == "ConnectorGlow");
+                }
+            }
+        }
+        return null;
+    }
+
+    private void AnimateRouteTransmit(string routeId)
+    {
+        if (!_connectionPaths.TryGetValue(routeId, out var path)) return;
+
+        var storyboard = new Storyboard();
+
+        var colorAnim = new ColorAnimationUsingKeyFrames();
+        colorAnim.KeyFrames.Add(new DiscreteColorKeyFrame(Colors.LightGreen, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+        colorAnim.KeyFrames.Add(new DiscreteColorKeyFrame(Colors.LightGreen, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(150))));
+        colorAnim.KeyFrames.Add(new EasingColorKeyFrame(((SolidColorBrush)path.Stroke).Color, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(300))));
+
+        Storyboard.SetTargetProperty(colorAnim, new PropertyPath("(Shape.Stroke).(SolidColorBrush.Color)"));
+        storyboard.Children.Add(colorAnim);
+
+        var blurAnim = new DoubleAnimationUsingKeyFrames();
+        blurAnim.KeyFrames.Add(new DiscreteDoubleKeyFrame(15, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+        blurAnim.KeyFrames.Add(new DiscreteDoubleKeyFrame(15, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(150))));
+        blurAnim.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(300))));
+
+        if (path.Effect == null)
+        {
+            path.Effect = new DropShadowEffect { Color = Colors.LightGreen, BlurRadius = 0, ShadowDepth = 0, Opacity = 1 };
+        }
+
+        Storyboard.SetTargetProperty(blurAnim, new PropertyPath("(UIElement.Effect).(DropShadowEffect.BlurRadius)"));
+        storyboard.Children.Add(blurAnim);
+
+        storyboard.Begin(path);
+    }
+
+    private static void AnimateGlow(Ellipse glow, Color color)
+    {
+        glow.Fill = new RadialGradientBrush
+        {
+            GradientStops = new GradientStopCollection
+            {
+                new GradientStop(Color.FromArgb(200, color.R, color.G, color.B), 0),
+                new GradientStop(Color.FromArgb(0, color.R, color.G, color.B), 1)
+            }
+        };
+
+        var storyboard = new Storyboard();
+
+        var opacityAnim = new DoubleAnimationUsingKeyFrames();
+        opacityAnim.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+        opacityAnim.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(150))));
+        opacityAnim.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(300)))
+        {
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+        });
+
+        Storyboard.SetTargetProperty(opacityAnim, new PropertyPath("Opacity"));
+        storyboard.Children.Add(opacityAnim);
+
+        var blurAnim = new DoubleAnimationUsingKeyFrames();
+        blurAnim.KeyFrames.Add(new DiscreteDoubleKeyFrame(12, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+        blurAnim.KeyFrames.Add(new DiscreteDoubleKeyFrame(12, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(150))));
+        blurAnim.KeyFrames.Add(new EasingDoubleKeyFrame(6, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(300))));
+
+        Storyboard.SetTargetProperty(blurAnim, new PropertyPath("(UIElement.Effect).(BlurEffect.Radius)"));
+        storyboard.Children.Add(blurAnim);
+
+        storyboard.Begin(glow);
     }
 }

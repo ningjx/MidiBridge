@@ -697,18 +697,9 @@ public static class NetworkMidi2Protocol
         if (payload == null || nameWords < 0) return false;
 
         int nameLen = nameWords * 4;
-        Serilog.Log.Debug("[NM2] ParseInvitationReply: payload.Length={PayloadLen}, nameWords={NameWords}, nameLen={NameLen}", 
-            payload.Length, nameWords, nameLen);
-
-        if (payload.Length < nameLen)
-        {
-            Serilog.Log.Debug("[NM2] ParseInvitationReply: payload 长度不足, 需要 {NameLen}, 实际 {PayloadLen}", nameLen, payload.Length);
-            return false;
-        }
+        if (payload.Length < nameLen) return false;
 
         umpEndpointName = TrimString(Encoding.UTF8.GetString(payload, 0, nameLen));
-        Serilog.Log.Debug("[NM2] ParseInvitationReply: 原始名称字节={RawName}, 解析后={ParsedName}", 
-            BitConverter.ToString(payload, 0, nameLen), umpEndpointName);
 
         int productOffset = nameLen;
         int productLen = payload.Length - productOffset;
