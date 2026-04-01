@@ -886,13 +886,18 @@ protected override void OnMouseUp(MouseButtonEventArgs e)
             var container = itemsControl.ItemContainerGenerator.ContainerFromItem(item) as ContentPresenter;
             if (container == null) continue;
 
-            var border = FindVisualChild<Border>(container);
-            if (border?.Tag?.ToString() == deviceId)
+            var device = item as MidiDevice;
+            if (device?.Id != deviceId) continue;
+
+            var grid = FindVisualChild<Grid>(container);
+            if (grid == null) continue;
+
+            foreach (var child in grid.Children)
             {
-                var grid = FindVisualChild<Grid>(container);
-                if (grid != null)
+                if (child is Grid innerGrid)
                 {
-                    return grid.Children.OfType<Ellipse>().FirstOrDefault(e => e.Name == "ConnectorGlow");
+                    var glow = innerGrid.Children.OfType<Ellipse>().FirstOrDefault(e => e.Name == "ConnectorGlow");
+                    if (glow != null) return glow;
                 }
             }
         }
@@ -907,16 +912,16 @@ protected override void OnMouseUp(MouseButtonEventArgs e)
 
         var colorAnim = new ColorAnimationUsingKeyFrames();
         colorAnim.KeyFrames.Add(new DiscreteColorKeyFrame(Colors.LightGreen, KeyTime.FromTimeSpan(TimeSpan.Zero)));
-        colorAnim.KeyFrames.Add(new DiscreteColorKeyFrame(Colors.LightGreen, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(150))));
-        colorAnim.KeyFrames.Add(new EasingColorKeyFrame(((SolidColorBrush)path.Stroke).Color, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(300))));
+        colorAnim.KeyFrames.Add(new DiscreteColorKeyFrame(Colors.LightGreen, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(50))));
+        colorAnim.KeyFrames.Add(new EasingColorKeyFrame(((SolidColorBrush)path.Stroke).Color, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(100))));
 
         Storyboard.SetTargetProperty(colorAnim, new PropertyPath("(Shape.Stroke).(SolidColorBrush.Color)"));
         storyboard.Children.Add(colorAnim);
 
         var blurAnim = new DoubleAnimationUsingKeyFrames();
         blurAnim.KeyFrames.Add(new DiscreteDoubleKeyFrame(15, KeyTime.FromTimeSpan(TimeSpan.Zero)));
-        blurAnim.KeyFrames.Add(new DiscreteDoubleKeyFrame(15, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(150))));
-        blurAnim.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(300))));
+        blurAnim.KeyFrames.Add(new DiscreteDoubleKeyFrame(15, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(50))));
+        blurAnim.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(100))));
 
         if (path.Effect == null)
         {
@@ -944,8 +949,8 @@ protected override void OnMouseUp(MouseButtonEventArgs e)
 
         var opacityAnim = new DoubleAnimationUsingKeyFrames();
         opacityAnim.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.Zero)));
-        opacityAnim.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(150))));
-        opacityAnim.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(300)))
+        opacityAnim.KeyFrames.Add(new DiscreteDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(50))));
+        opacityAnim.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(100)))
         {
             EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
         });
@@ -955,8 +960,8 @@ protected override void OnMouseUp(MouseButtonEventArgs e)
 
         var blurAnim = new DoubleAnimationUsingKeyFrames();
         blurAnim.KeyFrames.Add(new DiscreteDoubleKeyFrame(12, KeyTime.FromTimeSpan(TimeSpan.Zero)));
-        blurAnim.KeyFrames.Add(new DiscreteDoubleKeyFrame(12, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(150))));
-        blurAnim.KeyFrames.Add(new EasingDoubleKeyFrame(6, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(300))));
+        blurAnim.KeyFrames.Add(new DiscreteDoubleKeyFrame(12, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(50))));
+        blurAnim.KeyFrames.Add(new EasingDoubleKeyFrame(6, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(100))));
 
         Storyboard.SetTargetProperty(blurAnim, new PropertyPath("(UIElement.Effect).(BlurEffect.Radius)"));
         storyboard.Children.Add(blurAnim);
