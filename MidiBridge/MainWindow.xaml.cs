@@ -11,6 +11,7 @@ using System.Windows.Controls;
 using System.Windows.Media.Animation;
 using MidiBridge.Controls;
 using MidiBridge.Models;
+using MidiBridge.Utils;
 using MidiBridge.ViewModels;
 using MidiBridge.Services.NetworkMidi2;
 
@@ -172,14 +173,7 @@ public partial class MainWindow : Window
 
     private static T? FindParent<T>(DependencyObject child) where T : DependencyObject
     {
-        DependencyObject? parent = VisualTreeHelper.GetParent(child);
-        while (parent != null)
-        {
-            if (parent is T typed)
-                return typed;
-            parent = VisualTreeHelper.GetParent(parent);
-        }
-        return null;
+        return VisualTreeUtils.FindParent<T>(child);
     }
 
     private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
@@ -267,17 +261,7 @@ public partial class MainWindow : Window
 
     private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
     {
-        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
-        {
-            var child = VisualTreeHelper.GetChild(parent, i);
-            if (child is T typed)
-                return typed;
-
-            var result = FindVisualChild<T>(child);
-            if (result != null)
-                return result;
-        }
-        return null;
+        return VisualTreeUtils.FindVisualChild<T>(parent);
     }
 
     private void Connection_RightClick(object sender, MouseButtonEventArgs e)
@@ -769,12 +753,14 @@ protected override void OnMouseUp(MouseButtonEventArgs e)
     {
         if (!VM.IsNetworkRunning) return;
 
-        var dialog = new ConnectDeviceDialog();
+        var (lastIp, lastPort) = VM.ConfigService.GetNM2Connection();
+        var dialog = new ConnectDeviceDialog(lastIp, lastPort);
         dialog.Owner = this;
         
         if (dialog.ShowDialog() == true)
         {
             VM.ConnectNM2Device(dialog.DeviceIp, dialog.DevicePort);
+            VM.ConfigService.SaveNM2Connection(dialog.DeviceIp, dialog.DevicePort);
         }
     }
 

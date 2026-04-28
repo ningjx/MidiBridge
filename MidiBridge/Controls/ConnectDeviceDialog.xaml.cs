@@ -1,3 +1,4 @@
+using MidiBridge.Utils;
 using System.Windows;
 using System.Windows.Input;
 
@@ -5,8 +6,8 @@ namespace MidiBridge.Controls;
 
 public partial class ConnectDeviceDialog : Window
 {
-    public string DeviceIp => IpTextBox.Text.Trim();
-    public int DevicePort => int.TryParse(PortTextBox.Text.Trim(), out int port) ? port : 5506;
+    public string DeviceIp => NetworkUtils.ExtractIpAddress(IpTextBox.Text.Trim());
+    public int DevicePort => NetworkUtils.ExtractPort(IpTextBox.Text.Trim(), PortTextBox.Text.Trim());
 
     public ConnectDeviceDialog()
     {
@@ -40,13 +41,15 @@ public partial class ConnectDeviceDialog : Window
 
     private void ConnectButton_Click(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(DeviceIp))
+        var extractedIp = DeviceIp;
+        if (string.IsNullOrWhiteSpace(extractedIp) || !NetworkUtils.IsValidIpAddress(extractedIp))
         {
             IpTextBox.Focus();
             return;
         }
 
-        if (DevicePort <= 0 || DevicePort > 65535)
+        var extractedPort = DevicePort;
+        if (extractedPort <= 0 || extractedPort > 65535)
         {
             PortTextBox.Focus();
             return;

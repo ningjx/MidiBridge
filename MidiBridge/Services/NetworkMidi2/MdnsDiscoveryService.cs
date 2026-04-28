@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using MidiBridge.Services.Interfaces;
+using MidiBridge.Utils;
 using Serilog;
 
 namespace MidiBridge.Services.NetworkMidi2;
@@ -332,23 +333,7 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
 
     private bool IsLocalAddress(IPAddress address)
     {
-        if (IPAddress.IsLoopback(address)) return true;
-
-        try
-        {
-            var host = Dns.GetHostEntry(Dns.GetHostName());
-            foreach (var ip in host.AddressList)
-            {
-                if (ip.AddressFamily == AddressFamily.InterNetwork && ip.Equals(address))
-                    return true;
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Debug(ex, "[mDNS] 获取本地主机信息失败");
-        }
-
-        return false;
+        return NetworkUtils.IsLocalAddress(address);
     }
 
     private string ReadName(byte[] data, ref int offset)
@@ -635,15 +620,7 @@ public class MdnsDiscoveryService : IMdnsDiscoveryService
 
     private IPAddress GetLocalIPAddress()
     {
-        var host = Dns.GetHostEntry(Dns.GetHostName());
-        foreach (var ip in host.AddressList)
-        {
-            if (ip.AddressFamily == AddressFamily.InterNetwork)
-            {
-                return ip;
-            }
-        }
-        return IPAddress.Loopback;
+        return NetworkUtils.GetLocalIPAddress();
     }
 
     public void Dispose()

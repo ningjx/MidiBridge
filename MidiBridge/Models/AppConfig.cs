@@ -4,6 +4,7 @@ public class AppConfig
 {
     public WindowConfig Window { get; set; } = new();
     public NetworkConfig Network { get; set; } = new();
+    public NM2ConnectionConfig NM2Connection { get; set; } = new();
     public List<RouteConfig> Routes { get; set; } = new();
     public List<string> InputDeviceOrder { get; set; } = new();
     public List<string> OutputDeviceOrder { get; set; } = new();
@@ -24,6 +25,12 @@ public class NetworkConfig
     public int RtpPort { get; set; } = 5004;
     public int NM2Port { get; set; } = 5506;
     public bool AutoStart { get; set; }
+}
+
+public class NM2ConnectionConfig
+{
+    public string LastIp { get; set; } = "";
+    public int LastPort { get; set; } = 5506;
 }
 
 public class RouteConfig

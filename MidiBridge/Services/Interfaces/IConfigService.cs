@@ -86,4 +86,14 @@ public interface IConfigService
     /// 更新网络设置。
     /// </summary>
     void UpdateNetworkSettings(int rtpPort, int nm2Port, bool autoStart);
+
+    /// <summary>
+    /// 获取上次NM2设备连接信息。
+    /// </summary>
+    (string Ip, int Port) GetNM2Connection();
+
+    /// <summary>
+    /// 保存NM2设备连接信息。
+    /// </summary>
+    void SaveNM2Connection(string ip, int port);
 }

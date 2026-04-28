@@ -6,6 +6,7 @@ using System.Net.Sockets;
 using System.Text;
 using MidiBridge.Models;
 using MidiBridge.Services.Interfaces;
+using MidiBridge.Utils;
 using Serilog;
 
 namespace MidiBridge.Services.NetworkMidi2;
@@ -523,12 +524,7 @@ public class NetworkMidi2Service : INetworkMidi2Service
 
     private static bool CompareDigests(byte[] a, byte[] b)
     {
-        if (a == null || b == null || a.Length != b.Length) return false;
-        for (int i = 0; i < a.Length; i++)
-        {
-            if (a[i] != b[i]) return false;
-        }
-        return true;
+        return SecurityUtils.CompareDigests(a, b);
     }
 
     private void AcceptSession(string sessionId, string name, IPEndPoint remoteEP, NetworkMidi2Protocol.InvitationCapabilities capabilities)

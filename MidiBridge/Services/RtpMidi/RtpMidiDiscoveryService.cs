@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using MidiBridge.Models;
+using MidiBridge.Utils;
 using Serilog;
 
 namespace MidiBridge.Services.RtpMidi;
@@ -237,20 +238,7 @@ public class RtpMidiDiscoveryService : IDisposable
 
     private bool IsLocalAddress(IPAddress address)
     {
-        if (IPAddress.IsLoopback(address)) return true;
-
-        try
-        {
-            var host = Dns.GetHostEntry(Dns.GetHostName());
-            foreach (var ip in host.AddressList)
-            {
-                if (ip.AddressFamily == AddressFamily.InterNetwork && ip.Equals(address))
-                    return true;
-            }
-        }
-        catch { }
-
-        return false;
+        return NetworkUtils.IsLocalAddress(address);
     }
 
     private string ReadName(byte[] data, ref int offset)
@@ -491,15 +479,7 @@ public class RtpMidiDiscoveryService : IDisposable
 
     private IPAddress GetLocalIPAddress()
     {
-        var host = Dns.GetHostEntry(Dns.GetHostName());
-        foreach (var ip in host.AddressList)
-        {
-            if (ip.AddressFamily == AddressFamily.InterNetwork)
-            {
-                return ip;
-            }
-        }
-        return IPAddress.Loopback;
+        return NetworkUtils.GetLocalIPAddress();
     }
 
     public void Dispose()

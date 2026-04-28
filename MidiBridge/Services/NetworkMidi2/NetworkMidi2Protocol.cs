@@ -1,4 +1,5 @@
 using System.Text;
+using MidiBridge.Utils;
 
 namespace MidiBridge.Services.NetworkMidi2;
 
@@ -407,16 +408,12 @@ public static class NetworkMidi2Protocol
 
     public static byte[] ComputeAuthDigest(string cryptoNonce, string sharedSecret)
     {
-        var data = cryptoNonce + sharedSecret;
-        using var sha256 = System.Security.Cryptography.SHA256.Create();
-        return sha256.ComputeHash(Encoding.UTF8.GetBytes(data));
+        return SecurityUtils.ComputeSHA256Hash(cryptoNonce + sharedSecret);
     }
 
     public static byte[] ComputeUserAuthDigest(string cryptoNonce, string username, string password)
     {
-        var data = cryptoNonce + username + password;
-        using var sha256 = System.Security.Cryptography.SHA256.Create();
-        return sha256.ComputeHash(Encoding.UTF8.GetBytes(data));
+        return SecurityUtils.ComputeSHA256Hash(cryptoNonce + username + password);
     }
 
     public static string GenerateCryptoNonce()

@@ -87,6 +87,18 @@ public class ConfigService : IConfigService
         _config.Network.AutoStart = autoStart;
     }
 
+    public (string Ip, int Port) GetNM2Connection()
+    {
+        return (_config.NM2Connection.LastIp, _config.NM2Connection.LastPort);
+    }
+
+    public void SaveNM2Connection(string ip, int port)
+    {
+        _config.NM2Connection.LastIp = ip;
+        _config.NM2Connection.LastPort = port;
+        Save();
+    }
+
     public List<RouteConfig> GetRoutes()
     {
         return _config.Routes;
